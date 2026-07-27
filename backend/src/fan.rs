@@ -252,8 +252,12 @@ impl FanController {
             let target_rpm_1 = Self::calculate_auto_rpm_smooth(effective_temp, max_rpm_1);
             let target_rpm_2 = Self::calculate_auto_rpm_smooth(effective_temp, max_rpm_2);
 
-            let _ = self.set_fan_speed(1, target_rpm_1);
-            let _ = self.set_fan_speed(2, target_rpm_2);
+            // Ramp both fans using maximum required target speed under heavy thermal loads
+            let max_target_rpm_1 = target_rpm_1.max((target_rpm_2 as f64 * (max_rpm_1 as f64 / max_rpm_2.max(1) as f64)) as u32);
+            let max_target_rpm_2 = target_rpm_2.max((target_rpm_1 as f64 * (max_rpm_2 as f64 / max_rpm_1.max(1) as f64)) as u32);
+
+            let _ = self.set_fan_speed(1, max_target_rpm_1);
+            let _ = self.set_fan_speed(2, max_target_rpm_2);
         }
     }
 
