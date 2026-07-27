@@ -1,7 +1,7 @@
 use gtk4::prelude::*;
 use gtk4::{
     Align, Application, ApplicationWindow, Box as GtkBox, DropDown, Label, Orientation, Scale,
-    StringList,
+    StringList, Switch,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -14,7 +14,7 @@ pub fn build_ui(app: &Application) {
         .application(app)
         .title("HP Victus Fan Control")
         .default_width(440)
-        .default_height(420)
+        .default_height(460)
         .build();
 
     let main_box = GtkBox::new(Orientation::Vertical, 16);
@@ -55,6 +55,35 @@ pub fn build_ui(app: &Application) {
     mode_dropdown.set_selected(1); // Default to BETTER_AUTO
     mode_section.append(&mode_dropdown);
     main_box.append(&mode_section);
+
+    // Overheat Warnings Toggle
+    let notify_section = GtkBox::new(Orientation::Horizontal, 12);
+    notify_section.set_halign(Align::Start);
+    let notify_label = Label::builder()
+        .label("<span weight='bold'>Enable Overheat Warnings</span>")
+        .use_markup(true)
+        .build();
+    let notify_switch = Switch::new();
+
+    // Check initial service state
+    let is_monitor_active = std::process::Command::new("systemctl")
+        .args(["--user", "is-active", "--quiet", "victus-monitor.service"])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    notify_switch.set_active(is_monitor_active);
+
+    notify_switch.connect_active_notify(move |sw| {
+        let active = sw.is_active();
+        let cmd_arg = if active { "enable" } else { "disable" };
+        let _ = std::process::Command::new("systemctl")
+            .args(["--user", cmd_arg, "--now", "victus-monitor.service"])
+            .status();
+    });
+
+    notify_section.append(&notify_label);
+    notify_section.append(&notify_switch);
+    main_box.append(&notify_section);
 
     // Fan 1 Speed Slider & Label
     let fan1_section = GtkBox::new(Orientation::Vertical, 6);
