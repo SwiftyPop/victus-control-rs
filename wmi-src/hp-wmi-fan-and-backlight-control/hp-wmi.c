@@ -348,6 +348,7 @@ static const struct key_entry hp_wmi_keymap[] = {
  */
 static DEFINE_MUTEX(active_platform_profile_lock);
 static DEFINE_MUTEX(fourzone_led_lock);
+static DEFINE_MUTEX(hp_fan_control_lock);
 
 static struct input_dev *hp_wmi_input_dev;
 static struct input_dev *camera_shutter_input_dev;
@@ -473,6 +474,13 @@ static int hp_wmi_perform_query(int query, enum hp_wmi_command command,
 
 	if (obj->type != ACPI_TYPE_BUFFER) {
 		pr_warn("query 0x%x returned an invalid object 0x%x\n", query, ret);
+		ret = -EINVAL;
+		goto out_free;
+	}
+
+	if (obj->buffer.length < sizeof(struct bios_return)) {
+		pr_warn("query 0x%x returned buffer size %u smaller than bios_return\n",
+			query, (unsigned int)obj->buffer.length);
 		ret = -EINVAL;
 		goto out_free;
 	}
@@ -717,27 +725,37 @@ static int hp_wmi_set_fan_speed(int fan, int fan_speed)
 {
 	short int fan1_speed;
 	short int fan2_speed;
+	int current_fan;
 
 	// We are dividing by 100 because the bios expects the value in hundreds of RPM.
 	if (fan == 0) {
 		fan1_speed = fan_speed / 100;
 		if (is_victus_s_thermal_profile()) {
-			fan2_speed = hp_wmi_get_fan_speed_victus_s(1) / 100;
+			current_fan = hp_wmi_get_fan_speed_victus_s(1);
 		} else {
-			fan2_speed = hp_wmi_get_fan_speed(1) / 100;
+			current_fan = hp_wmi_get_fan_speed(1);
 		}
+		if (current_fan < 0)
+			return current_fan;
+		fan2_speed = current_fan / 100;
 	} else if (fan == 1) {
 		fan2_speed = fan_speed / 100;
 		if (is_victus_s_thermal_profile()) {
-			fan1_speed = hp_wmi_get_fan_speed_victus_s(0) / 100;
+			current_fan = hp_wmi_get_fan_speed_victus_s(0);
 		} else {
-			fan1_speed = hp_wmi_get_fan_speed(0) / 100;
+			current_fan = hp_wmi_get_fan_speed(0);
 		}
+		if (current_fan < 0)
+			return current_fan;
+		fan1_speed = current_fan / 100;
 	} else {
 		return -EINVAL;
-	};
+	}
 
-	u8 fans_speed[2] = { fan1_speed, fan2_speed };
+	if (fan1_speed < 0 || fan1_speed > 255 || fan2_speed < 0 || fan2_speed > 255)
+		return -EINVAL;
+
+	u8 fans_speed[2] = { (u8)fan1_speed, (u8)fan2_speed };
 	int ret;
 
 	ret = hp_wmi_perform_query(HPWMI_FAN_SPEED_SET_QUERY, HPWMI_GM,
@@ -1165,10 +1183,7 @@ static void hp_wmi_notify_event(union acpi_object *obj)
 		break;
 	case HPWMI_CAMERA_TOGGLE:
 		if (!camera_shutter_input_dev)
-			if (camera_shutter_input_setup()) {
-				pr_err("Failed to setup camera shutter input device\n");
-				break;
-			}
+			break;
 		if (event_data == 0xff)
 			input_report_switch(camera_shutter_input_dev, SW_CAMERA_LENS_COVER, 1);
 		else if (event_data == 0xfe)
@@ -1246,6 +1261,11 @@ static int __init hp_wmi_input_setup(void)
 	if (!hp_wmi_bios_2009_later() && hp_wmi_bios_2008_later())
 		hp_wmi_enable_hotkeys();
 
+	if (!camera_shutter_input_dev) {
+		if (camera_shutter_input_setup())
+			pr_warn("Could not set up camera shutter input device during init\n");
+	}
+
 	status = wmi_install_notify_handler(HPWMI_EVENT_GUID, hp_wmi_notify, NULL);
 	if (ACPI_FAILURE(status)) {
 		err = -EIO;
@@ -1262,6 +1282,10 @@ static int __init hp_wmi_input_setup(void)
 	wmi_remove_notify_handler(HPWMI_EVENT_GUID);
  err_free_dev:
 	input_free_device(hp_wmi_input_dev);
+	if (camera_shutter_input_dev) {
+		input_unregister_device(camera_shutter_input_dev);
+		camera_shutter_input_dev = NULL;
+	}
 	return err;
 }
 
@@ -1269,6 +1293,10 @@ static void hp_wmi_input_destroy(void)
 {
 	wmi_remove_notify_handler(HPWMI_EVENT_GUID);
 	input_unregister_device(hp_wmi_input_dev);
+	if (camera_shutter_input_dev) {
+		input_unregister_device(camera_shutter_input_dev);
+		camera_shutter_input_dev = NULL;
+	}
 }
 
 static int __init hp_wmi_rfkill_setup(struct platform_device *device)
@@ -1523,15 +1551,21 @@ static int __init hp_mc_leds_register(int num_zones)
 		  sizeof(color_table));
 
 	for (int zone = 0; zone < num_zones; zone++) {
-		static struct led_classdev_mc multicolor_led_dev;
+		struct led_classdev_mc multicolor_led_dev = {};
 		struct led_classdev *led_cdev;
 		struct mc_subled *mc_subled_info; 
 
 		led_cdev = &multicolor_led_dev.led_cdev;
-		led_cdev->name = kasprintf(GFP_KERNEL, "hp::kbd_backlight");
 		if (num_zones > 1) {
-			led_cdev->name = kasprintf(GFP_KERNEL, "hp::kbd_backlight_zone%d", zone);
+			led_cdev->name = devm_kasprintf(&hp_wmi_platform_dev->dev, GFP_KERNEL,
+							"hp::kbd_backlight_zone%d", zone);
+		} else {
+			led_cdev->name = devm_kasprintf(&hp_wmi_platform_dev->dev, GFP_KERNEL,
+							"hp::kbd_backlight");
 		}
+		if (!led_cdev->name)
+			return -ENOMEM;
+
 		led_cdev->brightness = hp_kbd_backlight_is_on() ? LED_FULL : LED_OFF;
 		led_cdev->max_brightness = LED_FULL;
 		led_cdev->brightness_set_blocking = hp_kbd_set_brightness;
@@ -1698,10 +1732,10 @@ static ssize_t zone_show(struct device *dev, struct device_attribute *attr, char
 	if (ret)
 		return ret;
 
-	return sprintf(buf, "%02X%02X%02X\n",
-			 target_zone->colors.red,
-			 target_zone->colors.green,
-			 target_zone->colors.blue);
+	return sysfs_emit(buf, "%02X%02X%02X\n",
+			  target_zone->colors.red,
+			  target_zone->colors.green,
+			  target_zone->colors.blue);
 }
 
 static ssize_t zone_set(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
@@ -2831,6 +2865,8 @@ static int hp_wmi_hwmon_read(struct device *dev, enum hwmon_sensor_types type,
 {
 	int ret;
 
+	guard(mutex)(&hp_fan_control_lock);
+
 	switch (type) {
 	case hwmon_fan:
 		switch (attr) {
@@ -2877,6 +2913,8 @@ static int hp_wmi_hwmon_read(struct device *dev, enum hwmon_sensor_types type,
 static int hp_wmi_hwmon_write(struct device *dev, enum hwmon_sensor_types type,
 			      u32 attr, int channel, long val)
 {
+	guard(mutex)(&hp_fan_control_lock);
+
 	switch (type) {
 	case hwmon_pwm:
 		switch (val) {
@@ -2920,9 +2958,8 @@ static int hp_wmi_hwmon_write(struct device *dev, enum hwmon_sensor_types type,
 }
 
 static const struct hwmon_channel_info * const info[] = {
-	HWMON_CHANNEL_INFO(fan, HWMON_F_INPUT, HWMON_F_INPUT),
-	HWMON_CHANNEL_INFO(fan, HWMON_F_MAX, HWMON_F_MAX),
-	HWMON_CHANNEL_INFO(fan, HWMON_F_TARGET, HWMON_F_TARGET),
+	HWMON_CHANNEL_INFO(fan, HWMON_F_INPUT | HWMON_F_MAX | HWMON_F_TARGET,
+				HWMON_F_INPUT | HWMON_F_MAX | HWMON_F_TARGET),
 	HWMON_CHANNEL_INFO(pwm, HWMON_PWM_ENABLE),
 	NULL
 };
@@ -2989,15 +3026,17 @@ static int __init hp_wmi_init(void)
 	if (is_omen_thermal_profile() || is_victus_thermal_profile()) {
 		err = omen_register_powersource_event_handler();
 		if (err)
-			goto err_unregister_device;
+			goto err_unregister_driver;
 	} else if (is_victus_s_thermal_profile()) {
 		err = victus_s_register_powersource_event_handler();
 		if (err)
-			goto err_unregister_device;
+			goto err_unregister_driver;
 	}
 
 	return 0;
 
+err_unregister_driver:
+	platform_driver_unregister(&hp_wmi_driver);
 err_unregister_device:
 	platform_device_unregister(hp_wmi_platform_dev);
 err_destroy_input:
