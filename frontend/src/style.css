@@ -1,78 +1,109 @@
-/* HP Victus Control GTK4 CSS Theme */
+/* Breeze Dark Compact Theme for HP Victus Control */
 
 window {
-    background-color: #1e1e2e;
-    color: #cdd6f4;
+    background-color: #2a2e32;
+    color: #fcfcfc;
+    font-size: 13px;
 }
 
 headerbar {
-    background-color: #181825;
-    color: #cdd6f4;
-    border-bottom: 1px solid #313244;
+    background-color: #212529;
+    color: #fcfcfc;
+    border-bottom: 1px solid #4d545b;
+    min-height: 38px;
+    padding: 0 8px;
 }
 
-.card-box {
-    background-color: #181825;
-    border: 1px solid #313244;
-    border-radius: 12px;
-    padding: 16px;
+.compact-card {
+    background-color: #31363b;
+    border: 1px solid #4d545b;
+    border-radius: 6px;
+    padding: 10px 12px;
 }
 
-.temp-badge {
-    background-color: #313244;
-    color: #89b4fa;
+.temp-badge-cpu {
+    background-color: #232629;
+    color: #3daee9;
     font-weight: bold;
-    font-size: 14px;
-    padding: 8px 16px;
-    border-radius: 8px;
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    border: 1px solid #4d545b;
 }
 
 .temp-badge-gpu {
-    background-color: #313244;
-    color: #a6e3a1;
+    background-color: #232629;
+    color: #2ecc71;
     font-weight: bold;
-    font-size: 14px;
-    padding: 8px 16px;
-    border-radius: 8px;
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    border: 1px solid #4d545b;
 }
 
 .section-title {
     font-weight: bold;
-    font-size: 14px;
-    color: #cdd6f4;
+    font-size: 12px;
+    color: #fcfcfc;
 }
 
 .section-subtitle {
-    font-size: 12px;
-    color: #a6adc8;
+    font-size: 11px;
+    color: #a1a9b1;
+}
+
+dropdown {
+    background-color: #232629;
+    color: #fcfcfc;
+    border: 1px solid #4d545b;
+    border-radius: 4px;
+    padding: 2px 6px;
+    min-height: 28px;
+}
+
+dropdown:hover {
+    border-color: #3daee9;
+}
+
+switch {
+    border-radius: 12px;
+    min-width: 36px;
+    min-height: 20px;
+}
+
+switch:checked {
+    background-color: #3daee9;
 }
 
 scale trough {
-    background-color: #313244;
-    border-radius: 4px;
-    min-height: 8px;
+    background-color: #232629;
+    border-radius: 3px;
+    min-height: 5px;
 }
 
 scale highlight {
-    background-color: #89b4fa;
-    border-radius: 4px;
+    background-color: #3daee9;
+    border-radius: 3px;
 }
 
 scale slider {
-    min-width: 18px;
-    min-height: 18px;
+    min-width: 14px;
+    min-height: 14px;
+    margin: -4px 0;
     border-radius: 50%;
-    background-color: #b4befe;
+    background-color: #3daee9;
+    border: 1px solid #2a2e32;
 }
 
 scale:disabled trough {
-    background-color: #181825;
+    background-color: #2a2e32;
 }
 
 scale:disabled highlight {
-    background-color: #45475a;
+    background-color: #4d545b;
 }
 
 scale:disabled slider {
-    background-color: #585b70;
+    background-color: #4d545b;
+    border: none;
 }
