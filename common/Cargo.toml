@@ -1,0 +1,9 @@
+[package]
+name = "victus-common"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+zbus.workspace = true
+serde.workspace = true

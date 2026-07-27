@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+members = [
+    "common",
+    "backend",
+    "frontend",
+]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2021"
+authors = ["Victus Control Team"]
+
+[workspace.dependencies]
+zbus = "4.4"
+tokio = { version = "1.38", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+anyhow = "1.0"
+gtk4 = "0.9"
+glib = "0.20"
+gio = "0.20"

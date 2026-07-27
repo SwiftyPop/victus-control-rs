@@ -1,0 +1,14 @@
+[package]
+name = "victus-control"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+victus-common = { path = "../common" }
+gtk4 = { workspace = true, features = ["v4_12"] }
+glib.workspace = true
+gio.workspace = true
+zbus.workspace = true
+tokio.workspace = true
+anyhow.workspace = true

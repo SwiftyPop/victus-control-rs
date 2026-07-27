@@ -1,0 +1,15 @@
+[Unit]
+Description=Victus Control temperature monitor (desktop notifications)
+Documentation=https://github.com/Batuhan4/victus-control
+# Only meaningful inside a graphical session where notifications can be shown.
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/victus-monitor
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=graphical-session.target

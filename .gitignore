@@ -1,0 +1,16 @@
+target/
+/.vscode
+*build/
+pkg/
+.cache/
+
+.gemini/
+gha-creds-*.json
+AGENTS.md
+test_backend.py
+wmi-project/
+hp-wmi-fan-and-backlight-control/
+
+# Python bytecode cache (monitor/)
+__pycache__/
+*.pyc
