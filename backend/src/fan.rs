@@ -153,8 +153,11 @@ impl FanController {
             return Ok(());
         }
 
-        let pwm_enable_path = hwmon_dir.join("pwm1_enable");
-        let _ = fs::write(&pwm_enable_path, "1");
+        let current_mode = self.get_mode();
+        if current_mode == FanMode::BetterAuto || current_mode == FanMode::Manual {
+            let pwm_enable_path = hwmon_dir.join("pwm1_enable");
+            let _ = fs::write(&pwm_enable_path, "1");
+        }
 
         let target_file = hwmon_dir.join(format!("fan{}_target", fan_id));
         let fallback_file = hwmon_dir.join("pwm1");
@@ -163,7 +166,13 @@ impl FanController {
             fs::write(&target_file, speed.to_string())
                 .map_err(|e| format!("Failed to write fan speed to {}: {}", target_file.display(), e))?;
         } else if fallback_file.exists() {
-            let pwm_val = ((speed.saturating_sub(2000) as f64 / 4000.0) * 255.0).clamp(0.0, 255.0) as u32;
+            // Map 2000 RPM -> PWM 55 (active floor prevents motor stall), 5800+ RPM -> PWM 255
+            let pwm_val = if speed <= 2000 {
+                55
+            } else {
+                let ratio = ((speed.saturating_sub(2000) as f64) / 3800.0).clamp(0.0, 1.0);
+                (55.0 + ratio * 200.0) as u32
+            };
             fs::write(&fallback_file, pwm_val.to_string())
                 .map_err(|e| format!("Failed to write pwm speed to {}: {}", fallback_file.display(), e))?;
         } else {
