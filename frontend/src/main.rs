@@ -11,10 +11,9 @@ fn main() {
         .build();
 
     app.connect_activate(|app| {
-        // Load CSS styling
+        // Load embedded CSS styling
         let provider = CssProvider::new();
-        let css_bytes = include_bytes!("style.css");
-        provider.load_from_string(std::str::from_utf8(css_bytes).unwrap_or(""));
+        provider.load_from_string(include_str!("style.css"));
 
         if let Some(display) = Display::default() {
             gtk4::style_context_add_provider_for_display(

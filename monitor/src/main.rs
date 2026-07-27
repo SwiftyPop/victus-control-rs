@@ -1,6 +1,9 @@
+#![allow(clippy::too_many_arguments)]
+
 mod alert;
 
 use std::time::{Duration, Instant};
+
 use anyhow::Result;
 use tracing::{info, warn};
 use zbus::proxy;
@@ -26,6 +29,7 @@ pub trait VictusControl {
     fn get_fan_mode(&self) -> zbus::Result<String>;
 }
 
+#[allow(clippy::too_many_arguments)]
 #[proxy(
     default_service = "org.freedesktop.Notifications",
     interface = "org.freedesktop.Notifications",
@@ -140,7 +144,10 @@ async fn main() -> Result<()> {
                 send_notification(
                     &session_conn,
                     "CPU running hot",
-                    &format!("CPU above 85 °C for 12 s (now {:.0} °C). Check active workloads.", c),
+                    &format!(
+                        "CPU above 85 °C for 12 s (now {:.0} °C). Check active workloads.",
+                        c
+                    ),
                     false,
                 )
                 .await;
@@ -150,7 +157,10 @@ async fn main() -> Result<()> {
                 send_notification(
                     &session_conn,
                     "CPU very hot",
-                    &format!("CPU above 90 °C for 9 s (now {:.0} °C). Close heavy workloads.", c),
+                    &format!(
+                        "CPU above 90 °C for 9 s (now {:.0} °C). Close heavy workloads.",
+                        c
+                    ),
                     false,
                 )
                 .await;
@@ -182,7 +192,10 @@ async fn main() -> Result<()> {
                 send_notification(
                     &session_conn,
                     "GPU running hot",
-                    &format!("GPU above 80 °C for 12 s (now {:.0} °C). Check active workloads.", g),
+                    &format!(
+                        "GPU above 80 °C for 12 s (now {:.0} °C). Check active workloads.",
+                        g
+                    ),
                     false,
                 )
                 .await;
@@ -221,7 +234,7 @@ async fn main() -> Result<()> {
                 } else {
                     "the fans are barely spinning"
                 };
-                let comp_name = if cpu.map_or(false, |c| (c - h).abs() < 0.1) {
+                let comp_name = if cpu.is_some_and(|c| (c - h).abs() < 0.1) {
                     "CPU"
                 } else {
                     "GPU"

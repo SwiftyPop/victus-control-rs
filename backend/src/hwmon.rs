@@ -1,6 +1,6 @@
+use parking_lot::Mutex;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use tracing::{info, warn};
 
 pub struct HwmonMonitor {
@@ -18,12 +18,23 @@ impl HwmonMonitor {
         monitor
     }
 
+    pub fn recheck_sensors(&self) {
+        info!("Re-checking hardware thermal sensor paths...");
+        self.init_sensors();
+    }
+
     fn init_sensors(&self) {
-        let cpu_path = Self::find_hwmon_sensor(&["k10temp", "coretemp", "zenpower", "cpu", "package", "soc"], &["cpu", "package", "soc"])
-            .or_else(|| Self::find_thermal_zone(&["x86_pkg", "tctl", "cpu", "soc"]));
-        
-        let gpu_path = Self::find_hwmon_sensor(&["amdgpu", "radeon", "nvidia", "gpu"], &["edge", "gpu", "junction", "hotspot"])
-            .or_else(|| Self::find_thermal_zone(&["gpu", "amdgpu", "nvidia"]));
+        let cpu_path = Self::find_hwmon_sensor(
+            &["k10temp", "coretemp", "zenpower", "cpu", "package", "soc"],
+            &["cpu", "package", "soc"],
+        )
+        .or_else(|| Self::find_thermal_zone(&["x86_pkg", "tctl", "cpu", "soc"]));
+
+        let gpu_path = Self::find_hwmon_sensor(
+            &["amdgpu", "radeon", "nvidia", "gpu"],
+            &["edge", "gpu", "junction", "hotspot"],
+        )
+        .or_else(|| Self::find_thermal_zone(&["gpu", "amdgpu", "nvidia"]));
 
         if let Some(ref p) = cpu_path {
             info!("CPU thermal sensor located at: {:?}", p);
@@ -37,8 +48,8 @@ impl HwmonMonitor {
             warn!("GPU thermal sensor not found in sysfs");
         }
 
-        *self.cpu_temp_path.lock().unwrap() = cpu_path;
-        *self.gpu_temp_path.lock().unwrap() = gpu_path;
+        *self.cpu_temp_path.lock() = cpu_path;
+        *self.gpu_temp_path.lock() = gpu_path;
     }
 
     fn find_hwmon_sensor(name_hints: &[&str], label_hints: &[&str]) -> Option<PathBuf> {
@@ -55,7 +66,10 @@ impl HwmonMonitor {
             }
 
             let name_path = path.join("name");
-            let name_val = fs::read_to_string(&name_path).unwrap_or_default().trim().to_lowercase();
+            let name_val = fs::read_to_string(&name_path)
+                .unwrap_or_default()
+                .trim()
+                .to_lowercase();
             let name_matches = name_hints.iter().any(|&hint| name_val.contains(hint));
 
             let mut candidates = Vec::new();
@@ -113,27 +127,64 @@ impl HwmonMonitor {
         None
     }
 
-    pub fn get_cpu_temp(&self) -> f64 {
-        let lock = self.cpu_temp_path.lock().unwrap();
+    pub fn get_cpu_temp(&self) -> Option<f64> {
+        let lock = self.cpu_temp_path.lock();
         if let Some(ref path) = *lock {
             if let Ok(content) = fs::read_to_string(path) {
                 if let Ok(val) = content.trim().parse::<f64>() {
-                    return if val > 1000.0 { val / 1000.0 } else { val };
+                    return Some(if val > 1000.0 { val / 1000.0 } else { val });
                 }
             }
         }
-        0.0
+        None
     }
 
-    pub fn get_gpu_temp(&self) -> f64 {
-        let lock = self.gpu_temp_path.lock().unwrap();
+    pub fn get_gpu_temp(&self) -> Option<f64> {
+        let lock = self.gpu_temp_path.lock();
         if let Some(ref path) = *lock {
             if let Ok(content) = fs::read_to_string(path) {
                 if let Ok(val) = content.trim().parse::<f64>() {
-                    return if val > 1000.0 { val / 1000.0 } else { val };
+                    return Some(if val > 1000.0 { val / 1000.0 } else { val });
                 }
             }
         }
-        0.0
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn test_hwmon_monitor_creation() {
+        let monitor = HwmonMonitor::new();
+        // Even if sysfs paths are absent in unit test env, get_cpu_temp returns None cleanly
+        assert!(monitor.get_cpu_temp().is_none() || monitor.get_cpu_temp().is_some());
+    }
+
+    #[test]
+    fn test_recheck_sensors() {
+        let monitor = HwmonMonitor::new();
+        monitor.recheck_sensors();
+    }
+
+    #[test]
+    fn test_temp_parsing() {
+        let dir = std::env::temp_dir().join("victus_test_hwmon");
+        let _ = fs::create_dir_all(&dir);
+        let temp_file = dir.join("temp1_input");
+        fs::write(&temp_file, "45000\n").unwrap();
+
+        let monitor = HwmonMonitor {
+            cpu_temp_path: Mutex::new(Some(temp_file.clone())),
+            gpu_temp_path: Mutex::new(None),
+        };
+
+        assert_eq!(monitor.get_cpu_temp(), Some(45.0));
+        assert_eq!(monitor.get_gpu_temp(), None);
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

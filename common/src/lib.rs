@@ -53,8 +53,14 @@ mod tests {
     #[test]
     fn test_fan_mode_parsing() {
         assert_eq!(FanMode::from_str("AUTO").unwrap(), FanMode::Auto);
-        assert_eq!(FanMode::from_str("better_auto").unwrap(), FanMode::BetterAuto);
-        assert_eq!(FanMode::from_str("BetterAuto").unwrap(), FanMode::BetterAuto);
+        assert_eq!(
+            FanMode::from_str("better_auto").unwrap(),
+            FanMode::BetterAuto
+        );
+        assert_eq!(
+            FanMode::from_str("BetterAuto").unwrap(),
+            FanMode::BetterAuto
+        );
         assert_eq!(FanMode::from_str("manual").unwrap(), FanMode::Manual);
         assert_eq!(FanMode::from_str("MAX").unwrap(), FanMode::Max);
         assert!(FanMode::from_str("invalid_mode").is_err());

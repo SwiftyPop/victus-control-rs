@@ -2,15 +2,15 @@ mod dbus_service;
 mod fan;
 mod hwmon;
 
-use std::sync::Arc;
 use anyhow::Result;
-use tracing::info;
-use zbus::connection::Builder;
-use victus_common::{DESTINATION, PATH};
-
 use dbus_service::VictusControlService;
 use fan::FanController;
 use hwmon::HwmonMonitor;
+use std::sync::Arc;
+use tokio::signal::unix::{signal, SignalKind};
+use tracing::{info, warn};
+use victus_common::{DESTINATION, PATH};
+use zbus::connection::Builder;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -20,7 +20,7 @@ async fn main() -> Result<()> {
     let hwmon = Arc::new(HwmonMonitor::new());
     let fan = FanController::new(Arc::clone(&hwmon));
 
-    let dbus_service = VictusControlService::new(hwmon, fan);
+    let dbus_service = VictusControlService::new(Arc::clone(&hwmon), Arc::clone(&fan));
 
     info!("Registering D-Bus service name: {}", DESTINATION);
     let _conn = Builder::system()?
@@ -30,8 +30,22 @@ async fn main() -> Result<()> {
         .await?;
 
     info!("Victus Control D-Bus service is running.");
-    tokio::signal::ctrl_c().await?;
+
+    // Listen for SIGINT (Ctrl+C) and SIGTERM (systemctl stop)
+    let mut sigterm = signal(SignalKind::terminate())?;
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {
+            info!("Received SIGINT signal.");
+        }
+        _ = sigterm.recv() => {
+            info!("Received SIGTERM signal.");
+        }
+    }
+
     info!("Shutting down Victus Control System Daemon.");
+    if let Err(e) = fan.shutdown().await {
+        warn!("Failed to reset fan mode to AUTO on shutdown: {}", e);
+    }
 
     Ok(())
 }

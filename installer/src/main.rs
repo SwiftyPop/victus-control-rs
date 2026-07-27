@@ -71,6 +71,27 @@ fn ensure_root() -> Result<()> {
     Ok(())
 }
 
+fn run_cmd_env(cmd: &str, args: &[&str], envs: &[(&str, &str)]) -> Result<()> {
+    println!("--> Running: {} {}", cmd, args.join(" "));
+    let mut command = Command::new(cmd);
+    command.args(args);
+    for (k, v) in envs {
+        command.env(k, v);
+    }
+    let status = command
+        .status()
+        .with_context(|| format!("Failed to execute command: {} {}", cmd, args.join(" ")))?;
+    if !status.success() {
+        return Err(anyhow!(
+            "Command failed with exit code: {} ({} {})",
+            status.code().unwrap_or(-1),
+            cmd,
+            args.join(" ")
+        ));
+    }
+    Ok(())
+}
+
 fn install_dependencies(distro: &Distro) -> Result<()> {
     println!("--> Installing required system packages...");
     match distro {
@@ -114,8 +135,30 @@ fn install_dependencies(distro: &Distro) -> Result<()> {
             )?;
         }
         Distro::Ubuntu => {
-            run_cmd("apt-get", &["update"])?;
-            run_cmd(
+            run_cmd_env(
+                "apt-get",
+                &["update"],
+                &[("DEBIAN_FRONTEND", "noninteractive")],
+            )?;
+
+            let mut header_pkg = "linux-headers-generic".to_string();
+            if let Ok(output) = Command::new("uname").arg("-r").output() {
+                let kernel_release = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                let specific_headers = format!("linux-headers-{}", kernel_release);
+                let check = Command::new("dpkg-query")
+                    .args(["-W", "-f='${Status}'", &specific_headers])
+                    .output();
+
+                if let Ok(out) = check {
+                    if out.status.success()
+                        || !String::from_utf8_lossy(&out.stdout).contains("unknown")
+                    {
+                        header_pkg = specific_headers;
+                    }
+                }
+            }
+
+            run_cmd_env(
                 "apt-get",
                 &[
                     "install",
@@ -127,8 +170,9 @@ fn install_dependencies(distro: &Distro) -> Result<()> {
                     "dkms",
                     "sudo",
                     "libnotify-bin",
-                    "linux-headers-generic",
+                    &header_pkg,
                 ],
+                &[("DEBIAN_FRONTEND", "noninteractive")],
             )?;
         }
         Distro::Unknown => {
@@ -175,10 +219,7 @@ fn configure_hp_wmi_options() -> Result<()> {
 
 fn install_dkms_module(workspace_dir: &Path) -> Result<()> {
     println!("--> Building and installing patched hp-wmi kernel module...");
-    let mut wmi_dir = workspace_dir.join("wmi-src/hp-wmi-fan-and-backlight-control");
-    if !wmi_dir.exists() {
-        wmi_dir = workspace_dir.join("wmi-project/hp-wmi-fan-and-backlight-control");
-    }
+    let wmi_dir = workspace_dir.join("wmi-src/hp-wmi-fan-and-backlight-control");
     if !wmi_dir.exists() {
         return Err(anyhow!(
             "DKMS module source not found at {}",
@@ -216,17 +257,41 @@ fn install_dkms_module(workspace_dir: &Path) -> Result<()> {
         &["install", "hp-wmi-fan-and-backlight-control/0.0.2"],
     )?;
 
+    // Verify built module matches current running kernel
+    if let Ok(output) = Command::new("uname").arg("-r").output() {
+        let running_kernel = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if let Ok(status_out) = Command::new("dkms")
+            .args(["status", "hp-wmi-fan-and-backlight-control/0.0.2"])
+            .output()
+        {
+            let status_str = String::from_utf8_lossy(&status_out.stdout);
+            if status_str.contains(&running_kernel) {
+                println!(
+                    "--> Verified DKMS module built cleanly for running kernel ({})",
+                    running_kernel
+                );
+            } else {
+                println!(
+                    "⚠️ Warning: DKMS module installation status does not show running kernel ({})",
+                    running_kernel
+                );
+            }
+        }
+    }
+
     run_cmd_ignore_fail("depmod", &["-a"]);
 
     if Path::new("/sys/module/hp_wmi").exists() {
-        println!("--> Unloading running hp_wmi module...");
-        run_cmd_ignore_fail("modprobe", &["-r", "hp_wmi"]);
-        run_cmd_ignore_fail("rmmod", &["-f", "hp_wmi"]);
-        std::thread::sleep(std::time::Duration::from_secs(1));
+        println!("--> Unloading running hp_wmi module (without force)...");
+        if run_cmd("modprobe", &["-r", "hp_wmi"]).is_err() {
+            println!("⚠️ Could not unload active hp_wmi module. Please restart your system to complete the module update.");
+        } else {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
     }
 
     println!("--> Loading patched hp_wmi module with force_fan_control_support=1...");
-    run_cmd("modprobe", &["hp_wmi", "force_fan_control_support=1"])?;
+    let _ = run_cmd("modprobe", &["hp_wmi", "force_fan_control_support=1"]);
 
     Ok(())
 }
@@ -398,6 +463,30 @@ fn build_and_deploy_workspace(workspace_dir: &Path) -> Result<()> {
     Ok(())
 }
 
+fn install_gnome_extension(workspace_dir: &Path) -> Result<()> {
+    let has_gnome = Path::new("/usr/bin/gnome-shell").exists()
+        || env::var("XDG_CURRENT_DESKTOP")
+            .map(|d| d.to_lowercase().contains("gnome"))
+            .unwrap_or(false);
+
+    if has_gnome {
+        let script = workspace_dir.join("gnome-extension/install.sh");
+        if script.exists() {
+            println!("--> GNOME Shell detected; installing GNOME extension...");
+            let sudo_user = env::var("SUDO_USER").unwrap_or_default();
+            if !sudo_user.is_empty() && sudo_user != "root" {
+                run_cmd_ignore_fail(
+                    "sudo",
+                    &["-u", &sudo_user, "bash", script.to_str().unwrap()],
+                );
+            } else {
+                run_cmd_ignore_fail("bash", &[script.to_str().unwrap()]);
+            }
+        }
+    }
+    Ok(())
+}
+
 fn verify_installation() -> Result<()> {
     println!("--> Verifying hardware fan control interface...");
     let hwmon_base = Path::new("/sys/devices/platform/hp-wmi/hwmon");
@@ -411,18 +500,17 @@ fn verify_installation() -> Result<()> {
     if let Ok(entries) = fs::read_dir(hwmon_base) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_dir() {
-                if path.join("pwm1_enable").exists()
+            if path.is_dir()
+                && (path.join("pwm1_enable").exists()
                     || path.join("pwm1").exists()
-                    || path.join("fan1_target").exists()
-                {
-                    found_node = true;
-                    println!(
-                        "--> Verified hardware fan control interface at: {}",
-                        path.display()
-                    );
-                    break;
-                }
+                    || path.join("fan1_target").exists())
+            {
+                found_node = true;
+                println!(
+                    "--> Verified hardware fan control interface at: {}",
+                    path.display()
+                );
+                break;
             }
         }
     }
@@ -449,6 +537,7 @@ fn main() -> Result<()> {
     configure_hp_wmi_options()?;
     install_dkms_module(&current_dir)?;
     build_and_deploy_workspace(&current_dir)?;
+    install_gnome_extension(&current_dir)?;
     verify_installation()?;
 
     println!("\n=== Installation Completed Successfully! ===");

@@ -2,7 +2,7 @@
 Description=Victus Control Backend System Service
 After=systemd-modules-load.service victus-healthcheck.service network.target dbus.service
 Wants=victus-healthcheck.service
-Conflicts=victus-fan.service
+
 
 [Service]
 ExecStart=/usr/bin/victus-backend

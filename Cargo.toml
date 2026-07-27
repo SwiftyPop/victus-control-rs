@@ -5,9 +5,10 @@ members = ["common", "backend", "frontend", "installer", "monitor"]
 [workspace.package]
 version = "0.2.0"
 edition = "2021"
-authors = ["Victus Control Team"]
+authors = ["SwiftyPop <https://github.com/SwiftyPop>"]
 
 [workspace.dependencies]
+
 zbus = "5.5"
 tokio = { version = "1.38", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }

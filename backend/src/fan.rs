@@ -1,7 +1,8 @@
 use crate::hwmon::HwmonMonitor;
+use parking_lot::Mutex;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{debug, info, warn};
@@ -21,6 +22,7 @@ pub struct FanController {
     last_written_speed_1: Mutex<Option<u32>>,
     last_written_speed_2: Mutex<Option<u32>>,
     last_effective_temp: Mutex<f64>,
+    failed_temp_reads: Mutex<u32>,
 }
 
 impl FanController {
@@ -40,13 +42,13 @@ impl FanController {
             last_written_speed_1: Mutex::new(None),
             last_written_speed_2: Mutex::new(None),
             last_effective_temp: Mutex::new(0.0),
+            failed_temp_reads: Mutex::new(0),
         });
 
-        let _ = controller.set_mode(FanMode::BetterAuto);
-
-        // Spawn background task for BETTER_AUTO regulation
+        // Spawn background task for mode initialization and BETTER_AUTO regulation
         let controller_clone = Arc::clone(&controller);
         tokio::spawn(async move {
+            let _ = controller_clone.set_mode(FanMode::BetterAuto).await;
             controller_clone.better_auto_loop().await;
         });
 
@@ -85,7 +87,15 @@ impl FanController {
             }
         }
 
-        hwmon_dirs.sort();
+        // Sort numerically by hwmon index (e.g. hwmon2 before hwmon10)
+        hwmon_dirs.sort_by_key(|path| {
+            path.file_name()
+                .and_then(|s| s.to_str())
+                .and_then(|s| s.strip_prefix("hwmon"))
+                .and_then(|s| s.parse::<u32>().ok())
+                .unwrap_or(0)
+        });
+
         hwmon_dirs.pop()
     }
 
@@ -100,16 +110,16 @@ impl FanController {
         None
     }
 
-    pub fn get_fan_speed(&self, fan_id: u32) -> u32 {
+    pub fn get_fan_speed(&self, fan_id: u32) -> Option<u32> {
         if let Some(ref hwmon_dir) = self.cached_hwmon_dir {
             let path = hwmon_dir.join(format!("fan{}_input", fan_id));
             if let Ok(val_str) = fs::read_to_string(path) {
                 if let Ok(val) = val_str.trim().parse::<u32>() {
-                    return val;
+                    return Some(val);
                 }
             }
         }
-        0
+        None
     }
 
     pub fn get_fan_max_speed(&self, fan_id: u32) -> u32 {
@@ -121,25 +131,35 @@ impl FanController {
     }
 
     pub fn get_mode(&self) -> FanMode {
-        *self.mode.lock().unwrap()
+        *self.mode.lock()
     }
 
-    pub fn set_mode(&self, mode: FanMode) -> Result<(), String> {
-        let mut current_mode = self.mode.lock().unwrap();
-        let prev_mode = *current_mode;
-        *current_mode = mode;
+    pub async fn set_mode(&self, mode: FanMode) -> Result<(), String> {
+        let prev_mode = {
+            let mut current_mode = self.mode.lock();
+            let prev = *current_mode;
+            *current_mode = mode;
+            prev
+        };
 
         // Reset last written speeds on mode change to force fresh hardware write
-        *self.last_written_speed_1.lock().unwrap() = None;
-        *self.last_written_speed_2.lock().unwrap() = None;
+        *self.last_written_speed_1.lock() = None;
+        *self.last_written_speed_2.lock() = None;
 
         if let Some(ref hwmon_dir) = self.cached_hwmon_dir {
             let pwm_enable_path = hwmon_dir.join("pwm1_enable");
 
             // If coming out of MAX mode, write "2" (AUTO) first to trigger hardware max reset
-            if prev_mode == FanMode::Max && (mode == FanMode::BetterAuto || mode == FanMode::Manual) {
-                let _ = fs::write(&pwm_enable_path, "2");
-                std::thread::sleep(std::time::Duration::from_millis(100));
+            if prev_mode == FanMode::Max && (mode == FanMode::BetterAuto || mode == FanMode::Manual)
+            {
+                if let Err(e) = fs::write(&pwm_enable_path, "2") {
+                    return Err(format!(
+                        "Failed to write AUTO mode to {}: {}",
+                        pwm_enable_path.display(),
+                        e
+                    ));
+                }
+                sleep(Duration::from_millis(100)).await;
             }
 
             let mode_val = match mode {
@@ -149,16 +169,23 @@ impl FanController {
                 FanMode::Max => "0",
             };
             if let Err(e) = fs::write(&pwm_enable_path, mode_val) {
-                warn!(
+                let err_msg = format!(
                     "Failed to write pwm1_enable ({}): {}",
                     pwm_enable_path.display(),
                     e
                 );
+                warn!("{}", err_msg);
+                return Err(err_msg);
             }
         }
 
         info!("Fan mode set to: {:?}", mode);
         Ok(())
+    }
+
+    pub async fn shutdown(&self) -> Result<(), String> {
+        info!("Shutting down FanController: resetting fan control to firmware AUTO");
+        self.set_mode(FanMode::Auto).await
     }
 
     pub fn set_fan_speed(&self, fan_id: u32, speed: u32) -> Result<(), String> {
@@ -173,7 +200,7 @@ impl FanController {
         } else {
             &self.last_written_speed_1
         };
-        let mut last_speed_guard = last_speed_mutex.lock().unwrap();
+        let mut last_speed_guard = last_speed_mutex.lock();
         if Some(speed) == *last_speed_guard {
             return Ok(());
         }
@@ -221,12 +248,35 @@ impl FanController {
                 continue;
             }
 
-            let cpu_temp = self.monitor.get_cpu_temp();
-            let gpu_temp = self.monitor.get_gpu_temp();
-            let raw_max_temp = cpu_temp.max(gpu_temp);
+            let cpu_opt = self.monitor.get_cpu_temp();
+            let gpu_opt = self.monitor.get_gpu_temp();
+
+            let raw_max_temp = match (cpu_opt, gpu_opt) {
+                (Some(c), Some(g)) => {
+                    *self.failed_temp_reads.lock() = 0;
+                    c.max(g)
+                }
+                (Some(c), None) => {
+                    *self.failed_temp_reads.lock() = 0;
+                    c
+                }
+                (None, Some(g)) => {
+                    *self.failed_temp_reads.lock() = 0;
+                    g
+                }
+                (None, None) => {
+                    let mut count = self.failed_temp_reads.lock();
+                    *count += 1;
+                    if *count >= 3 {
+                        warn!("3 consecutive thermal sensor read failures detected; re-checking hwmon sensor paths");
+                        self.monitor.recheck_sensors();
+                    }
+                    *self.last_effective_temp.lock()
+                }
+            };
 
             // Thermal Hysteresis Deadband Processing
-            let mut last_temp_guard = self.last_effective_temp.lock().unwrap();
+            let mut last_temp_guard = self.last_effective_temp.lock();
             let effective_temp = if raw_max_temp > *last_temp_guard {
                 // Temp rising: update immediately
                 *last_temp_guard = raw_max_temp;
@@ -247,8 +297,10 @@ impl FanController {
             let target_rpm_2 = Self::calculate_auto_rpm_smooth(effective_temp, max_rpm_2);
 
             // Ramp both fans using maximum required target speed under heavy thermal loads
-            let max_target_rpm_1 = target_rpm_1.max((target_rpm_2 as f64 * (max_rpm_1 as f64 / max_rpm_2.max(1) as f64)) as u32);
-            let max_target_rpm_2 = target_rpm_2.max((target_rpm_1 as f64 * (max_rpm_2 as f64 / max_rpm_1.max(1) as f64)) as u32);
+            let max_target_rpm_1 = target_rpm_1
+                .max((target_rpm_2 as f64 * (max_rpm_1 as f64 / max_rpm_2.max(1) as f64)) as u32);
+            let max_target_rpm_2 = target_rpm_2
+                .max((target_rpm_1 as f64 * (max_rpm_2 as f64 / max_rpm_1.max(1) as f64)) as u32);
 
             let _ = self.set_fan_speed(1, max_target_rpm_1);
             let _ = self.set_fan_speed(2, max_target_rpm_2);
@@ -297,6 +349,36 @@ mod tests {
         assert_eq!(
             FanController::calculate_auto_rpm_smooth(95.0, max_rpm),
             6000
+        );
+    }
+
+    #[test]
+    fn test_hwmon_dir_numerical_sorting() {
+        let mut dirs = [
+            PathBuf::from("/sys/devices/platform/hp-wmi/hwmon/hwmon10"),
+            PathBuf::from("/sys/devices/platform/hp-wmi/hwmon/hwmon2"),
+            PathBuf::from("/sys/devices/platform/hp-wmi/hwmon/hwmon1"),
+        ];
+
+        dirs.sort_by_key(|path| {
+            path.file_name()
+                .and_then(|s| s.to_str())
+                .and_then(|s| s.strip_prefix("hwmon"))
+                .and_then(|s| s.parse::<u32>().ok())
+                .unwrap_or(0)
+        });
+
+        assert_eq!(
+            dirs[0],
+            PathBuf::from("/sys/devices/platform/hp-wmi/hwmon/hwmon1")
+        );
+        assert_eq!(
+            dirs[1],
+            PathBuf::from("/sys/devices/platform/hp-wmi/hwmon/hwmon2")
+        );
+        assert_eq!(
+            dirs[2],
+            PathBuf::from("/sys/devices/platform/hp-wmi/hwmon/hwmon10")
         );
     }
 }

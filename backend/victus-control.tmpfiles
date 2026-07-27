@@ -1,3 +1,0 @@
-# Create a directory for the victus-control socket
-# Type Path              Mode UID             GID            Age Argument
-d      /run/victus-control 0770 victus-backend victus         -   -
