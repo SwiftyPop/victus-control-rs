@@ -718,21 +718,14 @@ static int hp_wmi_set_fan_speed(int fan, int fan_speed)
 	short int fan1_speed;
 	short int fan2_speed;
 
-	// We are dividing by 100 because the bios expects the value in hundreds of RPM.
 	if (fan == 0) {
+		hp_fan_control.target_rpms[0] = fan_speed;
 		fan1_speed = fan_speed / 100;
-		if (is_victus_s_thermal_profile()) {
-			fan2_speed = hp_wmi_get_fan_speed_victus_s(1) / 100;
-		} else {
-			fan2_speed = hp_wmi_get_fan_speed(1) / 100;
-		}
+		fan2_speed = (hp_fan_control.target_rpms[1] > 0) ? (hp_fan_control.target_rpms[1] / 100) : (fan_speed / 100);
 	} else if (fan == 1) {
+		hp_fan_control.target_rpms[1] = fan_speed;
 		fan2_speed = fan_speed / 100;
-		if (is_victus_s_thermal_profile()) {
-			fan1_speed = hp_wmi_get_fan_speed_victus_s(0) / 100;
-		} else {
-			fan1_speed = hp_wmi_get_fan_speed(0) / 100;
-		}
+		fan1_speed = (hp_fan_control.target_rpms[0] > 0) ? (hp_fan_control.target_rpms[0] / 100) : (fan_speed / 100);
 	} else {
 		return -EINVAL;
 	};
