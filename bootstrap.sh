@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-repo_url="${VICTUS_CONTROL_REPO_URL:-https://github.com/Batuhan4/victus-control}"
+repo_url="${VICTUS_CONTROL_REPO_URL:-https://github.com/SwiftyPop/victus-control-rs}"
 repo_ref="${VICTUS_CONTROL_REF:-main}"
 archive_url="${VICTUS_CONTROL_ARCHIVE_URL:-${repo_url}/archive/refs/heads/${repo_ref}.tar.gz}"
 tmpdir=""

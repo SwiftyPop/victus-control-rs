@@ -24,9 +24,15 @@
 
 ## Installation
 
-Run the installation script:
-
+### Option 1: Quick Install One-Liner
 ```bash
+curl -fsSL https://raw.githubusercontent.com/SwiftyPop/victus-control-rs/main/bootstrap.sh | bash
+```
+
+### Option 2: Manual Clone & Install
+```bash
+git clone https://github.com/SwiftyPop/victus-control-rs.git
+cd victus-control-rs
 sudo ./install.sh
 ```
 
