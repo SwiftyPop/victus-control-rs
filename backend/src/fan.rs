@@ -1,3 +1,4 @@
+use crate::hwmon::HwmonMonitor;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -5,7 +6,6 @@ use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{info, warn};
 use victus_common::FanMode;
-use crate::hwmon::HwmonMonitor;
 
 const DEFAULT_MIN_RPM: u32 = 2000;
 const DEFAULT_MAX_RPM_FAN1: u32 = 5800;
@@ -26,8 +26,10 @@ pub struct FanController {
 impl FanController {
     pub fn new(monitor: Arc<HwmonMonitor>) -> Arc<Self> {
         let hwmon_dir = Self::find_hp_wmi_hwmon_dir();
-        let max_rpm_1 = Self::read_sysfs_max_speed(hwmon_dir.as_deref(), 1).unwrap_or(DEFAULT_MAX_RPM_FAN1);
-        let max_rpm_2 = Self::read_sysfs_max_speed(hwmon_dir.as_deref(), 2).unwrap_or(DEFAULT_MAX_RPM_FAN2);
+        let max_rpm_1 =
+            Self::read_sysfs_max_speed(hwmon_dir.as_deref(), 1).unwrap_or(DEFAULT_MAX_RPM_FAN1);
+        let max_rpm_2 =
+            Self::read_sysfs_max_speed(hwmon_dir.as_deref(), 2).unwrap_or(DEFAULT_MAX_RPM_FAN2);
 
         let controller = Arc::new(Self {
             mode: Mutex::new(FanMode::BetterAuto),
@@ -72,7 +74,12 @@ impl FanController {
         if let Ok(entries) = fs::read_dir(base) {
             for entry in entries.flatten() {
                 let p = entry.path();
-                if p.is_dir() && p.file_name().unwrap_or_default().to_string_lossy().starts_with("hwmon") {
+                if p.is_dir()
+                    && p.file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .starts_with("hwmon")
+                {
                     hwmon_dirs.push(p);
                 }
             }
@@ -119,6 +126,7 @@ impl FanController {
 
     pub fn set_mode(&self, mode: FanMode) -> Result<(), String> {
         let mut current_mode = self.mode.lock().unwrap();
+        let prev_mode = *current_mode;
         *current_mode = mode;
 
         // Reset last written speeds on mode change to force fresh hardware write
@@ -127,6 +135,13 @@ impl FanController {
 
         if let Some(ref hwmon_dir) = self.cached_hwmon_dir {
             let pwm_enable_path = hwmon_dir.join("pwm1_enable");
+
+            // If transitioning out of MAX mode, release hardware MAX lock first
+            if prev_mode == FanMode::Max && (mode == FanMode::BetterAuto || mode == FanMode::Manual)
+            {
+                let _ = fs::write(&pwm_enable_path, "2");
+            }
+
             let mode_val = match mode {
                 FanMode::Auto => "2",
                 FanMode::BetterAuto => "1",
@@ -134,7 +149,11 @@ impl FanController {
                 FanMode::Max => "0",
             };
             if let Err(e) = fs::write(&pwm_enable_path, mode_val) {
-                warn!("Failed to write pwm1_enable ({}): {}", pwm_enable_path.display(), e);
+                warn!(
+                    "Failed to write pwm1_enable ({}): {}",
+                    pwm_enable_path.display(),
+                    e
+                );
             }
         }
 
@@ -143,11 +162,17 @@ impl FanController {
     }
 
     pub fn set_fan_speed(&self, fan_id: u32, speed: u32) -> Result<(), String> {
-        let hwmon_dir = self.cached_hwmon_dir.as_ref()
+        let hwmon_dir = self
+            .cached_hwmon_dir
+            .as_ref()
             .ok_or_else(|| "hp-wmi hwmon directory not found".to_string())?;
 
         // Write Deduplication: Skip if speed value has not changed
-        let last_speed_mutex = if fan_id == 2 { &self.last_written_speed_2 } else { &self.last_written_speed_1 };
+        let last_speed_mutex = if fan_id == 2 {
+            &self.last_written_speed_2
+        } else {
+            &self.last_written_speed_1
+        };
         let mut last_speed_guard = last_speed_mutex.lock().unwrap();
         if Some(speed) == *last_speed_guard {
             return Ok(());
@@ -163,8 +188,13 @@ impl FanController {
         let fallback_file = hwmon_dir.join("pwm1");
 
         if target_file.exists() {
-            fs::write(&target_file, speed.to_string())
-                .map_err(|e| format!("Failed to write fan speed to {}: {}", target_file.display(), e))?;
+            fs::write(&target_file, speed.to_string()).map_err(|e| {
+                format!(
+                    "Failed to write fan speed to {}: {}",
+                    target_file.display(),
+                    e
+                )
+            })?;
         } else if fallback_file.exists() {
             // Map 2000 RPM -> PWM 55 (active floor prevents motor stall), 5800+ RPM -> PWM 255
             let pwm_val = if speed <= 2000 {
@@ -173,8 +203,13 @@ impl FanController {
                 let ratio = ((speed.saturating_sub(2000) as f64) / 3800.0).clamp(0.0, 1.0);
                 (55.0 + ratio * 200.0) as u32
             };
-            fs::write(&fallback_file, pwm_val.to_string())
-                .map_err(|e| format!("Failed to write pwm speed to {}: {}", fallback_file.display(), e))?;
+            fs::write(&fallback_file, pwm_val.to_string()).map_err(|e| {
+                format!(
+                    "Failed to write pwm speed to {}: {}",
+                    fallback_file.display(),
+                    e
+                )
+            })?;
         } else {
             return Err("No valid fan speed control file (fan_target or pwm1) found".to_string());
         }
@@ -245,10 +280,25 @@ mod tests {
     #[test]
     fn test_calculate_auto_rpm_smooth() {
         let max_rpm = 6000;
-        assert_eq!(FanController::calculate_auto_rpm_smooth(35.0, max_rpm), 2000);
-        assert_eq!(FanController::calculate_auto_rpm_smooth(45.0, max_rpm), 2000);
-        assert_eq!(FanController::calculate_auto_rpm_smooth(65.0, max_rpm), 4000);
-        assert_eq!(FanController::calculate_auto_rpm_smooth(85.0, max_rpm), 6000);
-        assert_eq!(FanController::calculate_auto_rpm_smooth(95.0, max_rpm), 6000);
+        assert_eq!(
+            FanController::calculate_auto_rpm_smooth(35.0, max_rpm),
+            2000
+        );
+        assert_eq!(
+            FanController::calculate_auto_rpm_smooth(45.0, max_rpm),
+            2000
+        );
+        assert_eq!(
+            FanController::calculate_auto_rpm_smooth(65.0, max_rpm),
+            4000
+        );
+        assert_eq!(
+            FanController::calculate_auto_rpm_smooth(85.0, max_rpm),
+            6000
+        );
+        assert_eq!(
+            FanController::calculate_auto_rpm_smooth(95.0, max_rpm),
+            6000
+        );
     }
 }
