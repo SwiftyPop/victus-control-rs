@@ -289,6 +289,7 @@ struct hp_fan_control {
 	bool have_manual_control;
 	enum hp_fan_control_mode mode;
 	int max_rpms[2];
+	int target_rpms[2];
 };
 
 struct hp_mc_leds {
