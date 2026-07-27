@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::time::sleep;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use victus_common::FanMode;
 
 const DEFAULT_MIN_RPM: u32 = 2000;
@@ -209,7 +209,7 @@ impl FanController {
         }
 
         *last_speed_guard = Some(speed);
-        info!("Set fan {} target speed to {} RPM", fan_id, speed);
+        debug!("Set fan {} target speed to {} RPM", fan_id, speed);
         Ok(())
     }
 
