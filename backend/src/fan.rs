@@ -10,17 +10,34 @@ use crate::hwmon::HwmonMonitor;
 const DEFAULT_MIN_RPM: u32 = 2000;
 const DEFAULT_MAX_RPM_FAN1: u32 = 5800;
 const DEFAULT_MAX_RPM_FAN2: u32 = 6100;
+const HYSTERESIS_DEADBAND: f64 = 2.0;
 
 pub struct FanController {
     mode: Mutex<FanMode>,
     monitor: Arc<HwmonMonitor>,
+    cached_hwmon_dir: Option<PathBuf>,
+    cached_max_rpm_1: u32,
+    cached_max_rpm_2: u32,
+    last_written_speed_1: Mutex<Option<u32>>,
+    last_written_speed_2: Mutex<Option<u32>>,
+    last_effective_temp: Mutex<f64>,
 }
 
 impl FanController {
     pub fn new(monitor: Arc<HwmonMonitor>) -> Arc<Self> {
+        let hwmon_dir = Self::find_hp_wmi_hwmon_dir();
+        let max_rpm_1 = Self::read_sysfs_max_speed(hwmon_dir.as_deref(), 1).unwrap_or(DEFAULT_MAX_RPM_FAN1);
+        let max_rpm_2 = Self::read_sysfs_max_speed(hwmon_dir.as_deref(), 2).unwrap_or(DEFAULT_MAX_RPM_FAN2);
+
         let controller = Arc::new(Self {
             mode: Mutex::new(FanMode::BetterAuto),
             monitor,
+            cached_hwmon_dir: hwmon_dir,
+            cached_max_rpm_1: max_rpm_1,
+            cached_max_rpm_2: max_rpm_2,
+            last_written_speed_1: Mutex::new(None),
+            last_written_speed_2: Mutex::new(None),
+            last_effective_temp: Mutex::new(0.0),
         });
 
         let _ = controller.set_mode(FanMode::BetterAuto);
@@ -34,10 +51,9 @@ impl FanController {
         controller
     }
 
-    pub fn get_hp_wmi_hwmon_dir() -> Option<PathBuf> {
+    fn find_hp_wmi_hwmon_dir() -> Option<PathBuf> {
         let base = Path::new("/sys/devices/platform/hp-wmi/hwmon");
         if !base.exists() {
-            // Fallback to /sys/class/hwmon search for hp-wmi
             if let Ok(entries) = fs::read_dir("/sys/class/hwmon") {
                 for entry in entries.flatten() {
                     let p = entry.path();
@@ -66,10 +82,20 @@ impl FanController {
         hwmon_dirs.pop()
     }
 
+    fn read_sysfs_max_speed(hwmon_dir: Option<&Path>, fan_id: u32) -> Option<u32> {
+        let dir = hwmon_dir?;
+        let path = dir.join(format!("fan{}_max", fan_id));
+        if let Ok(val_str) = fs::read_to_string(path) {
+            if let Ok(val) = val_str.trim().parse::<u32>() {
+                return Some(val);
+            }
+        }
+        None
+    }
+
     pub fn get_fan_speed(&self, fan_id: u32) -> u32 {
-        if let Some(hwmon_dir) = Self::get_hp_wmi_hwmon_dir() {
-            let file_name = format!("fan{}_input", fan_id);
-            let path = hwmon_dir.join(file_name);
+        if let Some(ref hwmon_dir) = self.cached_hwmon_dir {
+            let path = hwmon_dir.join(format!("fan{}_input", fan_id));
             if let Ok(val_str) = fs::read_to_string(path) {
                 if let Ok(val) = val_str.trim().parse::<u32>() {
                     return val;
@@ -80,16 +106,11 @@ impl FanController {
     }
 
     pub fn get_fan_max_speed(&self, fan_id: u32) -> u32 {
-        if let Some(hwmon_dir) = Self::get_hp_wmi_hwmon_dir() {
-            let file_name = format!("fan{}_max", fan_id);
-            let path = hwmon_dir.join(file_name);
-            if let Ok(val_str) = fs::read_to_string(path) {
-                if let Ok(val) = val_str.trim().parse::<u32>() {
-                    return val;
-                }
-            }
+        if fan_id == 2 {
+            self.cached_max_rpm_2
+        } else {
+            self.cached_max_rpm_1
         }
-        if fan_id == 2 { DEFAULT_MAX_RPM_FAN2 } else { DEFAULT_MAX_RPM_FAN1 }
     }
 
     pub fn get_mode(&self) -> FanMode {
@@ -100,7 +121,11 @@ impl FanController {
         let mut current_mode = self.mode.lock().unwrap();
         *current_mode = mode;
 
-        if let Some(hwmon_dir) = Self::get_hp_wmi_hwmon_dir() {
+        // Reset last written speeds on mode change to force fresh hardware write
+        *self.last_written_speed_1.lock().unwrap() = None;
+        *self.last_written_speed_2.lock().unwrap() = None;
+
+        if let Some(ref hwmon_dir) = self.cached_hwmon_dir {
             let pwm_enable_path = hwmon_dir.join("pwm1_enable");
             let mode_val = match mode {
                 FanMode::Auto => "2",
@@ -118,8 +143,15 @@ impl FanController {
     }
 
     pub fn set_fan_speed(&self, fan_id: u32, speed: u32) -> Result<(), String> {
-        let hwmon_dir = Self::get_hp_wmi_hwmon_dir()
+        let hwmon_dir = self.cached_hwmon_dir.as_ref()
             .ok_or_else(|| "hp-wmi hwmon directory not found".to_string())?;
+
+        // Write Deduplication: Skip if speed value has not changed
+        let last_speed_mutex = if fan_id == 2 { &self.last_written_speed_2 } else { &self.last_written_speed_1 };
+        let mut last_speed_guard = last_speed_mutex.lock().unwrap();
+        if Some(speed) == *last_speed_guard {
+            return Ok(());
+        }
 
         let pwm_enable_path = hwmon_dir.join("pwm1_enable");
         let _ = fs::write(&pwm_enable_path, "1");
@@ -138,6 +170,7 @@ impl FanController {
             return Err("No valid fan speed control file (fan_target or pwm1) found".to_string());
         }
 
+        *last_speed_guard = Some(speed);
         info!("Set fan {} target speed to {} RPM", fan_id, speed);
         Ok(())
     }
@@ -146,41 +179,53 @@ impl FanController {
         loop {
             sleep(Duration::from_secs(2)).await;
 
-            let current_mode = self.get_mode();
-            if current_mode != FanMode::BetterAuto {
+            if self.get_mode() != FanMode::BetterAuto {
                 continue;
             }
 
             let cpu_temp = self.monitor.get_cpu_temp();
             let gpu_temp = self.monitor.get_gpu_temp();
-            let max_temp = cpu_temp.max(gpu_temp);
+            let raw_max_temp = cpu_temp.max(gpu_temp);
 
-            let max_rpm_1 = self.get_fan_max_speed(1);
-            let max_rpm_2 = self.get_fan_max_speed(2);
+            // Thermal Hysteresis Deadband Processing
+            let mut last_temp_guard = self.last_effective_temp.lock().unwrap();
+            let effective_temp = if raw_max_temp > *last_temp_guard {
+                // Temp rising: update immediately
+                *last_temp_guard = raw_max_temp;
+                raw_max_temp
+            } else if raw_max_temp <= *last_temp_guard - HYSTERESIS_DEADBAND {
+                // Temp falling beyond deadband margin: update
+                *last_temp_guard = raw_max_temp;
+                raw_max_temp
+            } else {
+                // Temp dipping slightly within deadband: maintain previous effective temp
+                *last_temp_guard
+            };
 
-            let target_rpm_1 = Self::calculate_auto_rpm(max_temp, max_rpm_1);
-            let target_rpm_2 = Self::calculate_auto_rpm(max_temp, max_rpm_2);
+            let max_rpm_1 = self.cached_max_rpm_1;
+            let max_rpm_2 = self.cached_max_rpm_2;
+
+            let target_rpm_1 = Self::calculate_auto_rpm_smooth(effective_temp, max_rpm_1);
+            let target_rpm_2 = Self::calculate_auto_rpm_smooth(effective_temp, max_rpm_2);
 
             let _ = self.set_fan_speed(1, target_rpm_1);
             let _ = self.set_fan_speed(2, target_rpm_2);
         }
     }
 
-    fn calculate_auto_rpm(temp: f64, max_rpm: u32) -> u32 {
+    fn calculate_auto_rpm_smooth(temp: f64, max_rpm: u32) -> u32 {
         let min_rpm = DEFAULT_MIN_RPM;
-        if temp < 45.0 {
+        let raw_rpm = if temp < 45.0 {
             min_rpm
-        } else if temp < 55.0 {
-            min_rpm + (max_rpm - min_rpm) * 2 / 10
-        } else if temp < 65.0 {
-            min_rpm + (max_rpm - min_rpm) * 4 / 10
-        } else if temp < 75.0 {
-            min_rpm + (max_rpm - min_rpm) * 6 / 10
-        } else if temp < 85.0 {
-            min_rpm + (max_rpm - min_rpm) * 8 / 10
-        } else {
+        } else if temp >= 85.0 {
             max_rpm
-        }
+        } else {
+            let ratio = (temp - 45.0) / (85.0 - 45.0);
+            min_rpm + ((max_rpm - min_rpm) as f64 * ratio) as u32
+        };
+
+        // Quantize RPM to nearest 50 RPM step to eliminate noise
+        ((raw_rpm + 25) / 50) * 50
     }
 }
 
@@ -189,11 +234,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_calculate_auto_rpm_thresholds() {
+    fn test_calculate_auto_rpm_smooth() {
         let max_rpm = 6000;
-        assert_eq!(FanController::calculate_auto_rpm(35.0, max_rpm), DEFAULT_MIN_RPM);
-        assert_eq!(FanController::calculate_auto_rpm(50.0, max_rpm), DEFAULT_MIN_RPM + (max_rpm - DEFAULT_MIN_RPM) * 2 / 10);
-        assert_eq!(FanController::calculate_auto_rpm(70.0, max_rpm), DEFAULT_MIN_RPM + (max_rpm - DEFAULT_MIN_RPM) * 6 / 10);
-        assert_eq!(FanController::calculate_auto_rpm(90.0, max_rpm), max_rpm);
+        assert_eq!(FanController::calculate_auto_rpm_smooth(35.0, max_rpm), 2000);
+        assert_eq!(FanController::calculate_auto_rpm_smooth(45.0, max_rpm), 2000);
+        assert_eq!(FanController::calculate_auto_rpm_smooth(65.0, max_rpm), 4000);
+        assert_eq!(FanController::calculate_auto_rpm_smooth(85.0, max_rpm), 6000);
+        assert_eq!(FanController::calculate_auto_rpm_smooth(95.0, max_rpm), 6000);
     }
 }
