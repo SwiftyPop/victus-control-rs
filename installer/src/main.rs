@@ -274,6 +274,30 @@ fn build_and_deploy_workspace(workspace_dir: &Path) -> Result<()> {
             "/usr/bin/victus-control",
         ],
     )?;
+    run_cmd(
+        "install",
+        &[
+            "-m",
+            "0755",
+            release_dir.join("victus-monitor").to_str().unwrap(),
+            "/usr/bin/victus-monitor",
+        ],
+    )?;
+
+    // Monitor User Systemd Service
+    fs::create_dir_all("/usr/lib/systemd/user")?;
+    run_cmd(
+        "install",
+        &[
+            "-m",
+            "0644",
+            workspace_dir
+                .join("monitor/victus-monitor.service")
+                .to_str()
+                .unwrap(),
+            "/usr/lib/systemd/user/victus-monitor.service",
+        ],
+    )?;
 
     // D-Bus Policy
     run_cmd(

@@ -1,0 +1,17 @@
+[package]
+name = "victus-monitor"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "victus-monitor"
+path = "src/main.rs"
+
+[dependencies]
+victus-common = { path = "../common" }
+zbus = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }

@@ -5,6 +5,7 @@ members = [
     "backend",
     "frontend",
     "installer",
+    "monitor",
 ]
 
 [workspace.package]
