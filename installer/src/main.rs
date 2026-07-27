@@ -64,7 +64,9 @@ fn ensure_root() -> Result<()> {
         .context("Failed to check UID")?;
     let uid_str = String::from_utf8_lossy(&uid.stdout).trim().to_string();
     if uid_str != "0" {
-        return Err(anyhow!("Installer must be run with root privileges (sudo ./install.sh)."));
+        return Err(anyhow!(
+            "Installer must be run with root privileges (sudo ./install.sh)."
+        ));
     }
     Ok(())
 }
@@ -73,15 +75,7 @@ fn install_dependencies(distro: &Distro) -> Result<()> {
     println!("--> Installing required system packages...");
     match distro {
         Distro::Arch => {
-            let mut pkgs = vec![
-                "rust",
-                "cargo",
-                "gtk4",
-                "git",
-                "dkms",
-                "sudo",
-                "libnotify",
-            ];
+            let mut pkgs = vec!["rust", "cargo", "gtk4", "git", "dkms", "sudo", "libnotify"];
             // Detect running kernels for headers
             if let Ok(output) = Command::new("uname").arg("-r").output() {
                 let kernel_release = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -150,7 +144,14 @@ fn create_users_and_groups() -> Result<()> {
     run_cmd_ignore_fail("groupadd", &["-f", "victus-backend"]);
     run_cmd_ignore_fail(
         "useradd",
-        &["-r", "-g", "victus-backend", "-s", "/sbin/nologin", "victus-backend"],
+        &[
+            "-r",
+            "-g",
+            "victus-backend",
+            "-s",
+            "/sbin/nologin",
+            "victus-backend",
+        ],
     );
 
     if let Ok(sudo_user) = env::var("SUDO_USER") {
@@ -174,9 +175,15 @@ fn configure_hp_wmi_options() -> Result<()> {
 
 fn install_dkms_module(workspace_dir: &Path) -> Result<()> {
     println!("--> Building and installing patched hp-wmi kernel module...");
-    let wmi_dir = workspace_dir.join("wmi-project/hp-wmi-fan-and-backlight-control");
+    let mut wmi_dir = workspace_dir.join("wmi-src/hp-wmi-fan-and-backlight-control");
     if !wmi_dir.exists() {
-        return Err(anyhow!("DKMS module source not found at {}", wmi_dir.display()));
+        wmi_dir = workspace_dir.join("wmi-project/hp-wmi-fan-and-backlight-control");
+    }
+    if !wmi_dir.exists() {
+        return Err(anyhow!(
+            "DKMS module source not found at {}",
+            wmi_dir.display()
+        ));
     }
 
     let dkms_dest = Path::new("/usr/src/hp-wmi-fan-and-backlight-control-0.0.2");
@@ -184,14 +191,30 @@ fn install_dkms_module(workspace_dir: &Path) -> Result<()> {
         let _ = fs::remove_dir_all(dkms_dest);
     }
 
-    run_cmd("cp", &["-r", wmi_dir.to_str().unwrap(), dkms_dest.to_str().unwrap()])?;
+    run_cmd(
+        "cp",
+        &["-r", wmi_dir.to_str().unwrap(), dkms_dest.to_str().unwrap()],
+    )?;
 
     // Stop active services holding sysfs nodes open
-    run_cmd_ignore_fail("systemctl", &["stop", "victus-backend.service", "victus-healthcheck.service"]);
+    run_cmd_ignore_fail(
+        "systemctl",
+        &[
+            "stop",
+            "victus-backend.service",
+            "victus-healthcheck.service",
+        ],
+    );
 
-    run_cmd_ignore_fail("dkms", &["remove", "hp-wmi-fan-and-backlight-control/0.0.2", "--all"]);
+    run_cmd_ignore_fail(
+        "dkms",
+        &["remove", "hp-wmi-fan-and-backlight-control/0.0.2", "--all"],
+    );
     run_cmd("dkms", &["add", "hp-wmi-fan-and-backlight-control/0.0.2"])?;
-    run_cmd("dkms", &["install", "hp-wmi-fan-and-backlight-control/0.0.2"])?;
+    run_cmd(
+        "dkms",
+        &["install", "hp-wmi-fan-and-backlight-control/0.0.2"],
+    )?;
 
     run_cmd_ignore_fail("depmod", &["-a"]);
 
@@ -233,32 +256,120 @@ fn build_and_deploy_workspace(workspace_dir: &Path) -> Result<()> {
     println!("--> Deploying binaries and configuration assets...");
     let release_dir = workspace_dir.join("target/release");
 
-    run_cmd("install", &["-m", "0755", release_dir.join("victus-backend").to_str().unwrap(), "/usr/bin/victus-backend"])?;
-    run_cmd("install", &["-m", "0755", release_dir.join("victus-control").to_str().unwrap(), "/usr/bin/victus-control"])?;
+    run_cmd(
+        "install",
+        &[
+            "-m",
+            "0755",
+            release_dir.join("victus-backend").to_str().unwrap(),
+            "/usr/bin/victus-backend",
+        ],
+    )?;
+    run_cmd(
+        "install",
+        &[
+            "-m",
+            "0755",
+            release_dir.join("victus-control").to_str().unwrap(),
+            "/usr/bin/victus-control",
+        ],
+    )?;
 
     // D-Bus Policy
-    run_cmd("install", &["-m", "0644", workspace_dir.join("backend/org.hp.VictusControl.conf").to_str().unwrap(), "/usr/share/dbus-1/system.d/org.hp.VictusControl.conf"])?;
+    run_cmd(
+        "install",
+        &[
+            "-m",
+            "0644",
+            workspace_dir
+                .join("backend/org.hp.VictusControl.conf")
+                .to_str()
+                .unwrap(),
+            "/usr/share/dbus-1/system.d/org.hp.VictusControl.conf",
+        ],
+    )?;
 
     // Systemd service
-    run_cmd("install", &["-m", "0644", workspace_dir.join("backend/victus-backend.service").to_str().unwrap(), "/usr/lib/systemd/system/victus-backend.service"])?;
+    run_cmd(
+        "install",
+        &[
+            "-m",
+            "0644",
+            workspace_dir
+                .join("backend/victus-backend.service")
+                .to_str()
+                .unwrap(),
+            "/usr/lib/systemd/system/victus-backend.service",
+        ],
+    )?;
 
     // Desktop Launcher & Icon
-    run_cmd("install", &["-m", "0644", workspace_dir.join("frontend/victus-control.desktop").to_str().unwrap(), "/usr/share/applications/victus-control.desktop"])?;
+    run_cmd(
+        "install",
+        &[
+            "-m",
+            "0644",
+            workspace_dir
+                .join("frontend/victus-control.desktop")
+                .to_str()
+                .unwrap(),
+            "/usr/share/applications/victus-control.desktop",
+        ],
+    )?;
     fs::create_dir_all("/usr/share/icons/hicolor/scalable/apps")?;
-    run_cmd("install", &["-m", "0644", workspace_dir.join("frontend/victus-icon.svg").to_str().unwrap(), "/usr/share/icons/hicolor/scalable/apps/victus-icon.svg"])?;
+    run_cmd(
+        "install",
+        &[
+            "-m",
+            "0644",
+            workspace_dir
+                .join("frontend/victus-icon.svg")
+                .to_str()
+                .unwrap(),
+            "/usr/share/icons/hicolor/scalable/apps/victus-icon.svg",
+        ],
+    )?;
 
     // Healthcheck Service
     fs::create_dir_all("/usr/lib/victus-control")?;
-    run_cmd("install", &["-m", "0755", workspace_dir.join("backend/victus-healthcheck.sh").to_str().unwrap(), "/usr/lib/victus-control/victus-healthcheck.sh"])?;
-    run_cmd("install", &["-m", "0644", workspace_dir.join("backend/victus-healthcheck.service").to_str().unwrap(), "/usr/lib/systemd/system/victus-healthcheck.service"])?;
+    run_cmd(
+        "install",
+        &[
+            "-m",
+            "0755",
+            workspace_dir
+                .join("backend/victus-healthcheck.sh")
+                .to_str()
+                .unwrap(),
+            "/usr/lib/victus-control/victus-healthcheck.sh",
+        ],
+    )?;
+    run_cmd(
+        "install",
+        &[
+            "-m",
+            "0644",
+            workspace_dir
+                .join("backend/victus-healthcheck.service")
+                .to_str()
+                .unwrap(),
+            "/usr/lib/systemd/system/victus-healthcheck.service",
+        ],
+    )?;
 
     // Systemd reload & enable
     run_cmd("systemctl", &["daemon-reload"])?;
     run_cmd("systemctl", &["enable", "--now", "victus-backend.service"])?;
-    run_cmd("systemctl", &["enable", "--now", "victus-healthcheck.service"])?;
+    run_cmd(
+        "systemctl",
+        &["enable", "--now", "victus-healthcheck.service"],
+    )?;
 
     run_cmd_ignore_fail("update-desktop-database", &[]);
-    run_cmd_ignore_fail("gtk-update-icon-cache", &["-f", "-t", "/usr/share/icons/hicolor"]);
+    run_cmd_ignore_fail(
+        "gtk-update-icon-cache",
+        &["-f", "-t", "/usr/share/icons/hicolor"],
+    );
 
     Ok(())
 }
@@ -267,7 +378,9 @@ fn verify_installation() -> Result<()> {
     println!("--> Verifying hardware fan control interface...");
     let hwmon_base = Path::new("/sys/devices/platform/hp-wmi/hwmon");
     if !hwmon_base.exists() {
-        return Err(anyhow!("hp_wmi hwmon directory not found under /sys/devices/platform/hp-wmi/hwmon"));
+        return Err(anyhow!(
+            "hp_wmi hwmon directory not found under /sys/devices/platform/hp-wmi/hwmon"
+        ));
     }
 
     let mut found_node = false;
@@ -275,9 +388,15 @@ fn verify_installation() -> Result<()> {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                if path.join("pwm1_enable").exists() || path.join("pwm1").exists() || path.join("fan1_target").exists() {
+                if path.join("pwm1_enable").exists()
+                    || path.join("pwm1").exists()
+                    || path.join("fan1_target").exists()
+                {
                     found_node = true;
-                    println!("--> Verified hardware fan control interface at: {}", path.display());
+                    println!(
+                        "--> Verified hardware fan control interface at: {}",
+                        path.display()
+                    );
                     break;
                 }
             }
