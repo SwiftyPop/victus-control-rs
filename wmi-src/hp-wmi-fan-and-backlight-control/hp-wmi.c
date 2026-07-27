@@ -2887,6 +2887,8 @@ static int hp_wmi_hwmon_write(struct device *dev, enum hwmon_sensor_types type,
 			return hp_wmi_fan_speed_max_set(1);
 		case 1:
 			hp_fan_control.mode = HP_FAN_MODE_MANUAL;
+			hp_wmi_fan_speed_max_set(0);
+			hp_wmi_fan_speed_reset();
 			return 0;
 		case 2:
 			hp_fan_control.mode = HP_FAN_MODE_AUTOMATIC;
