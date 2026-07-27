@@ -1,0 +1,78 @@
+/* HP Victus Control GTK4 CSS Theme */
+
+window {
+    background-color: #1e1e2e;
+    color: #cdd6f4;
+}
+
+headerbar {
+    background-color: #181825;
+    color: #cdd6f4;
+    border-bottom: 1px solid #313244;
+}
+
+.card-box {
+    background-color: #181825;
+    border: 1px solid #313244;
+    border-radius: 12px;
+    padding: 16px;
+}
+
+.temp-badge {
+    background-color: #313244;
+    color: #89b4fa;
+    font-weight: bold;
+    font-size: 14px;
+    padding: 8px 16px;
+    border-radius: 8px;
+}
+
+.temp-badge-gpu {
+    background-color: #313244;
+    color: #a6e3a1;
+    font-weight: bold;
+    font-size: 14px;
+    padding: 8px 16px;
+    border-radius: 8px;
+}
+
+.section-title {
+    font-weight: bold;
+    font-size: 14px;
+    color: #cdd6f4;
+}
+
+.section-subtitle {
+    font-size: 12px;
+    color: #a6adc8;
+}
+
+scale trough {
+    background-color: #313244;
+    border-radius: 4px;
+    min-height: 8px;
+}
+
+scale highlight {
+    background-color: #89b4fa;
+    border-radius: 4px;
+}
+
+scale slider {
+    min-width: 18px;
+    min-height: 18px;
+    border-radius: 50%;
+    background-color: #b4befe;
+}
+
+scale:disabled trough {
+    background-color: #181825;
+}
+
+scale:disabled highlight {
+    background-color: #45475a;
+}
+
+scale:disabled slider {
+    background-color: #585b70;
+}
