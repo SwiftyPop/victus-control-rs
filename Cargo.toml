@@ -4,6 +4,7 @@ members = [
     "common",
     "backend",
     "frontend",
+    "installer",
 ]
 
 [workspace.package]

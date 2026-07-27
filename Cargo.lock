@@ -1447,6 +1447,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "victus-installer"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+]
+
+[[package]]
 name = "wasi"
 version = "0.11.1+wasi-snapshot-preview1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
