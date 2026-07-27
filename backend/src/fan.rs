@@ -119,7 +119,6 @@ impl FanController {
 
     pub fn set_mode(&self, mode: FanMode) -> Result<(), String> {
         let mut current_mode = self.mode.lock().unwrap();
-        let prev_mode = *current_mode;
         *current_mode = mode;
 
         // Reset last written speeds on mode change to force fresh hardware write
@@ -128,12 +127,6 @@ impl FanController {
 
         if let Some(ref hwmon_dir) = self.cached_hwmon_dir {
             let pwm_enable_path = hwmon_dir.join("pwm1_enable");
-
-            // If transitioning out of MAX mode, release hardware MAX lock first
-            if prev_mode == FanMode::Max && (mode == FanMode::BetterAuto || mode == FanMode::Manual) {
-                let _ = fs::write(&pwm_enable_path, "2");
-            }
-
             let mode_val = match mode {
                 FanMode::Auto => "2",
                 FanMode::BetterAuto => "1",

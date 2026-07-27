@@ -2925,11 +2925,6 @@ static int hp_wmi_hwmon_write(struct device *dev, enum hwmon_sensor_types type,
 			return hp_wmi_fan_speed_max_set(1);
 		case 1:
 			hp_fan_control.mode = HP_FAN_MODE_MANUAL;
-			if (is_victus_s_thermal_profile()) {
-				hp_wmi_get_fan_count_userdefine_trigger();
-				hp_wmi_fan_speed_max_reset();
-			} else
-				hp_wmi_fan_speed_max_set(0);
 			return 0;
 		case 2:
 			hp_fan_control.mode = HP_FAN_MODE_AUTOMATIC;
