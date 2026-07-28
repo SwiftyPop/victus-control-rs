@@ -145,16 +145,24 @@ fn install_dependencies(distro: &Distro) -> Result<()> {
             if let Ok(output) = Command::new("uname").arg("-r").output() {
                 let kernel_release = String::from_utf8_lossy(&output.stdout).trim().to_string();
                 let specific_headers = format!("linux-headers-{}", kernel_release);
-                let check = Command::new("dpkg-query")
+                // Check if specific kernel headers are installed (dpkg-query) or available in apt repositories (apt-cache)
+                let is_installed = Command::new("dpkg-query")
                     .args(["-W", "-f='${Status}'", &specific_headers])
-                    .output();
+                    .output()
+                    .map(|out| {
+                        out.status.success()
+                            && !String::from_utf8_lossy(&out.stdout).contains("unknown")
+                    })
+                    .unwrap_or(false);
 
-                if let Ok(out) = check {
-                    if out.status.success()
-                        || !String::from_utf8_lossy(&out.stdout).contains("unknown")
-                    {
-                        header_pkg = specific_headers;
-                    }
+                let is_available = Command::new("apt-cache")
+                    .args(["show", &specific_headers])
+                    .output()
+                    .map(|out| out.status.success())
+                    .unwrap_or(false);
+
+                if is_installed || is_available {
+                    header_pkg = specific_headers;
                 }
             }
 

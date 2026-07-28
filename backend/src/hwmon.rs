@@ -160,8 +160,21 @@ mod tests {
     #[test]
     fn test_hwmon_monitor_creation() {
         let monitor = HwmonMonitor::new();
-        // Even if sysfs paths are absent in unit test env, get_cpu_temp returns None cleanly
-        assert!(monitor.get_cpu_temp().is_none() || monitor.get_cpu_temp().is_some());
+        // If sysfs paths are present, temperature must be within plausible thermal limits (-50 °C to 150 °C)
+        if let Some(cpu_temp) = monitor.get_cpu_temp() {
+            assert!(
+                (-50.0..150.0).contains(&cpu_temp),
+                "CPU temperature {} out of valid range",
+                cpu_temp
+            );
+        }
+        if let Some(gpu_temp) = monitor.get_gpu_temp() {
+            assert!(
+                (-50.0..150.0).contains(&gpu_temp),
+                "GPU temperature {} out of valid range",
+                gpu_temp
+            );
+        }
     }
 
     #[test]

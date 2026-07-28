@@ -85,35 +85,34 @@ pub fn build_ui(app: &Application) {
     let notify_switch = Switch::new();
     notify_switch.set_valign(Align::Center);
 
-    // Check initial service state asynchronously
-    glib::spawn_future_local({
+    // Check initial service state asynchronously using GLib SubprocessLauncher (no Tokio runtime required)
+    let launcher = gio::SubprocessLauncher::new(gio::SubprocessFlags::NONE);
+    if let Ok(proc) = launcher.spawn(&[
+        std::ffi::OsStr::new("systemctl"),
+        std::ffi::OsStr::new("--user"),
+        std::ffi::OsStr::new("is-active"),
+        std::ffi::OsStr::new("--quiet"),
+        std::ffi::OsStr::new("victus-monitor.service"),
+    ]) {
         let sw_clone = notify_switch.clone();
-        async move {
-            let is_active = tokio::task::spawn_blocking(|| {
-                std::process::Command::new("systemctl")
-                    .args(["--user", "is-active", "--quiet", "victus-monitor.service"])
-                    .status()
-                    .map(|s| s.success())
-                    .unwrap_or(false)
-            })
-            .await
-            .unwrap_or(false);
-            sw_clone.set_active(is_active);
-        }
-    });
+        glib::spawn_future_local(async move {
+            let _ = proc.wait_future().await;
+            sw_clone.set_active(proc.is_successful());
+        });
+    }
 
-    // Async toggle for systemd monitor service
+    // Async toggle for systemd monitor service using GLib SubprocessLauncher
     notify_switch.connect_active_notify(move |sw| {
         let active = sw.is_active();
         let cmd_arg = if active { "enable" } else { "disable" };
-        glib::spawn_future_local(async move {
-            let _ = tokio::task::spawn_blocking(move || {
-                std::process::Command::new("systemctl")
-                    .args(["--user", cmd_arg, "--now", "victus-monitor.service"])
-                    .status()
-            })
-            .await;
-        });
+        let launcher = gio::SubprocessLauncher::new(gio::SubprocessFlags::NONE);
+        let _ = launcher.spawn(&[
+            std::ffi::OsStr::new("systemctl"),
+            std::ffi::OsStr::new("--user"),
+            std::ffi::OsStr::new(cmd_arg),
+            std::ffi::OsStr::new("--now"),
+            std::ffi::OsStr::new("victus-monitor.service"),
+        ]);
     });
 
     notify_box.append(&notify_title);
