@@ -87,8 +87,9 @@ scale highlight {
 }
 
 scale slider {
-    min-width: 14px;
-    min-height: 14px;
+    min-width: 16px;
+    min-height: 16px;
+    margin: 0;
     border-radius: 50%;
     background-color: #3daee9;
     border: 1px solid #2a2e32;
@@ -103,6 +104,10 @@ scale:disabled highlight {
 }
 
 scale:disabled slider {
+    min-width: 16px;
+    min-height: 16px;
+    margin: 0;
     background-color: #4d545b;
     border: none;
 }
+
