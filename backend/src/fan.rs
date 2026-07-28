@@ -59,15 +59,24 @@ impl FanController {
         let base = Path::new("/sys/devices/platform/hp-wmi/hwmon");
         if !base.exists() {
             if let Ok(entries) = fs::read_dir("/sys/class/hwmon") {
+                let mut fallback_dirs = Vec::new();
                 for entry in entries.flatten() {
                     let p = entry.path();
                     let name_p = p.join("name");
                     if let Ok(name) = fs::read_to_string(name_p) {
                         if name.trim().contains("hp") || name.trim().contains("hp-wmi") {
-                            return Some(p);
+                            fallback_dirs.push(p);
                         }
                     }
                 }
+                fallback_dirs.sort_by_key(|path| {
+                    path.file_name()
+                        .and_then(|s| s.to_str())
+                        .and_then(|s| s.strip_prefix("hwmon"))
+                        .and_then(|s| s.parse::<u32>().ok())
+                        .unwrap_or(0)
+                });
+                return fallback_dirs.pop();
             }
             return None;
         }

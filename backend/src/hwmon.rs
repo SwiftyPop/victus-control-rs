@@ -92,6 +92,8 @@ impl HwmonMonitor {
                 }
             }
 
+            candidates.sort();
+
             if name_matches && !candidates.is_empty() {
                 return Some(candidates[0].clone());
             }
@@ -132,7 +134,14 @@ impl HwmonMonitor {
         if let Some(ref path) = *lock {
             if let Ok(content) = fs::read_to_string(path) {
                 if let Ok(val) = content.trim().parse::<f64>() {
-                    return Some(if val > 1000.0 { val / 1000.0 } else { val });
+                    let temp = if val.abs() > 1000.0 {
+                        val / 1000.0
+                    } else {
+                        val
+                    };
+                    if (-50.0..=150.0).contains(&temp) {
+                        return Some(temp);
+                    }
                 }
             }
         }
@@ -144,7 +153,14 @@ impl HwmonMonitor {
         if let Some(ref path) = *lock {
             if let Ok(content) = fs::read_to_string(path) {
                 if let Ok(val) = content.trim().parse::<f64>() {
-                    return Some(if val > 1000.0 { val / 1000.0 } else { val });
+                    let temp = if val.abs() > 1000.0 {
+                        val / 1000.0
+                    } else {
+                        val
+                    };
+                    if (-50.0..=150.0).contains(&temp) {
+                        return Some(temp);
+                    }
                 }
             }
         }
