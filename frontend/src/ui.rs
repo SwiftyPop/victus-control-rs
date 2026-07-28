@@ -202,13 +202,7 @@ pub fn build_ui(app: &Application) {
                     }
 
                     if let Ok(current_mode) = proxy.get_fan_mode().await {
-                        let idx = match current_mode.as_str() {
-                            "AUTO" => 0,
-                            "BETTER_AUTO" => 1,
-                            "MANUAL" => 2,
-                            "MAX" => 3,
-                            _ => 1,
-                        };
+                        let idx = mode_str_to_index(&current_mode);
                         mode_dropdown_init.set_selected(idx);
                         let is_manual = idx == 2;
                         f1_scale_init.set_sensitive(is_manual);
@@ -312,13 +306,7 @@ pub fn build_ui(app: &Application) {
         f1_scale_mode.set_sensitive(is_manual);
         f2_scale_mode.set_sensitive(is_manual);
 
-        let mode_str = match idx {
-            0 => "AUTO",
-            1 => "BETTER_AUTO",
-            2 => "MANUAL",
-            3 => "MAX",
-            _ => "AUTO",
-        };
+        let mode_str = index_to_mode_str(idx);
 
         if let Some(ref proxy) = *proxy_mode.borrow() {
             let p = proxy.clone();
@@ -364,8 +352,7 @@ pub fn build_ui(app: &Application) {
     let err_lbl_f1 = error_label.clone();
     let last_sent_f1 = Rc::new(Cell::new(0u32));
     fan1_scale.connect_value_changed(move |scale| {
-        let raw_val = scale.value() as u32;
-        let val = ((raw_val + 25) / 50) * 50;
+        let val = quantize_rpm(scale.value());
         if val == last_sent_f1.get() {
             return;
         }
@@ -394,8 +381,7 @@ pub fn build_ui(app: &Application) {
     let err_lbl_f2 = error_label;
     let last_sent_f2 = Rc::new(Cell::new(0u32));
     fan2_scale.connect_value_changed(move |scale| {
-        let raw_val = scale.value() as u32;
-        let val = ((raw_val + 25) / 50) * 50;
+        let val = quantize_rpm(scale.value());
         if val == last_sent_f2.get() {
             return;
         }
@@ -418,4 +404,58 @@ pub fn build_ui(app: &Application) {
             });
         }
     });
+}
+
+pub fn mode_str_to_index(s: &str) -> u32 {
+    match s.trim().to_uppercase().as_str() {
+        "AUTO" => 0,
+        "BETTER_AUTO" | "BETTERAUTO" => 1,
+        "MANUAL" => 2,
+        "MAX" => 3,
+        _ => 1,
+    }
+}
+
+pub fn index_to_mode_str(idx: u32) -> &'static str {
+    match idx {
+        0 => "AUTO",
+        1 => "BETTER_AUTO",
+        2 => "MANUAL",
+        3 => "MAX",
+        _ => "AUTO",
+    }
+}
+
+pub fn quantize_rpm(raw_val: f64) -> u32 {
+    let val_u32 = raw_val as u32;
+    ((val_u32 + 25) / 50) * 50
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_mode_conversion_helpers() {
+        assert_eq!(mode_str_to_index("AUTO"), 0);
+        assert_eq!(mode_str_to_index("BETTER_AUTO"), 1);
+        assert_eq!(mode_str_to_index("MANUAL"), 2);
+        assert_eq!(mode_str_to_index("MAX"), 3);
+        assert_eq!(mode_str_to_index("UNKNOWN"), 1);
+
+        assert_eq!(index_to_mode_str(0), "AUTO");
+        assert_eq!(index_to_mode_str(1), "BETTER_AUTO");
+        assert_eq!(index_to_mode_str(2), "MANUAL");
+        assert_eq!(index_to_mode_str(3), "MAX");
+        assert_eq!(index_to_mode_str(99), "AUTO");
+    }
+
+    #[test]
+    fn test_quantize_rpm() {
+        assert_eq!(quantize_rpm(2010.0), 2000);
+        assert_eq!(quantize_rpm(2030.0), 2050);
+        assert_eq!(quantize_rpm(2074.0), 2050);
+        assert_eq!(quantize_rpm(2076.0), 2100);
+        assert_eq!(quantize_rpm(5800.0), 5800);
+    }
 }

@@ -186,4 +186,23 @@ mod tests {
         time = 21.0;
         assert!(!alert.update(Some(88.0), time));
     }
+
+    #[test]
+    fn test_sustained_alert_none_temp_resets_timer() {
+        let mut alert = SustainedAlert::new(85.0, 10.0);
+        let mut time = 0.0;
+
+        assert!(!alert.update(Some(86.0), time));
+        assert!(alert.above_since.is_some());
+
+        time = 5.0;
+        assert!(!alert.update(None, time));
+        assert!(alert.above_since.is_none());
+    }
+
+    #[test]
+    fn test_category_none_temp_handling() {
+        let mut cat = Category::new(80.0);
+        assert!(!cat.should_fire(None, 100.0));
+    }
 }

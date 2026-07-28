@@ -12,28 +12,34 @@ enum Distro {
     Unknown,
 }
 
-fn detect_distro() -> Distro {
-    if let Ok(content) = fs::read_to_string("/etc/os-release") {
-        let content_lower = content.to_lowercase();
-        if content_lower.contains("cachyos")
-            || content_lower.contains("arch")
-            || content_lower.contains("manjaro")
-            || content_lower.contains("endeavouros")
-        {
-            return Distro::Arch;
-        }
-        if content_lower.contains("fedora") || content_lower.contains("rhel") {
-            return Distro::Fedora;
-        }
-        if content_lower.contains("ubuntu")
-            || content_lower.contains("debian")
-            || content_lower.contains("pop")
-            || content_lower.contains("mint")
-        {
-            return Distro::Ubuntu;
-        }
+fn parse_os_release(content: &str) -> Distro {
+    let content_lower = content.to_lowercase();
+    if content_lower.contains("cachyos")
+        || content_lower.contains("arch")
+        || content_lower.contains("manjaro")
+        || content_lower.contains("endeavouros")
+    {
+        return Distro::Arch;
+    }
+    if content_lower.contains("fedora") || content_lower.contains("rhel") {
+        return Distro::Fedora;
+    }
+    if content_lower.contains("ubuntu")
+        || content_lower.contains("debian")
+        || content_lower.contains("pop")
+        || content_lower.contains("mint")
+    {
+        return Distro::Ubuntu;
     }
     Distro::Unknown
+}
+
+fn detect_distro() -> Distro {
+    if let Ok(content) = fs::read_to_string("/etc/os-release") {
+        parse_os_release(&content)
+    } else {
+        Distro::Unknown
+    }
 }
 
 fn run_cmd(cmd: &str, args: &[&str]) -> Result<()> {
@@ -555,4 +561,34 @@ fn main() -> Result<()> {
     println!("Run 'victus-control' or launch 'HP Victus Fan Control' from your application menu.");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_os_release_distros() {
+        assert_eq!(
+            parse_os_release("NAME=\"Ubuntu\"\nID=ubuntu"),
+            Distro::Ubuntu
+        );
+        assert_eq!(
+            parse_os_release("NAME=\"CachyOS\"\nID=cachyos"),
+            Distro::Arch
+        );
+        assert_eq!(
+            parse_os_release("NAME=\"Arch Linux\"\nID=arch"),
+            Distro::Arch
+        );
+        assert_eq!(
+            parse_os_release("NAME=\"Fedora Linux\"\nID=fedora"),
+            Distro::Fedora
+        );
+        assert_eq!(parse_os_release("NAME=\"Pop!_OS\"\nID=pop"), Distro::Ubuntu);
+        assert_eq!(
+            parse_os_release("NAME=\"Custom OS\"\nID=custom"),
+            Distro::Unknown
+        );
+    }
 }

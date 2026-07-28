@@ -61,9 +61,18 @@ mod tests {
             FanMode::from_str("BetterAuto").unwrap(),
             FanMode::BetterAuto
         );
+        assert_eq!(
+            FanMode::from_str("  better-auto  ").unwrap(),
+            FanMode::BetterAuto
+        );
+        assert_eq!(
+            FanMode::from_str("better auto").unwrap(),
+            FanMode::BetterAuto
+        );
         assert_eq!(FanMode::from_str("manual").unwrap(), FanMode::Manual);
         assert_eq!(FanMode::from_str("MAX").unwrap(), FanMode::Max);
         assert!(FanMode::from_str("invalid_mode").is_err());
+        assert!(FanMode::from_str("").is_err());
     }
 
     #[test]
@@ -72,5 +81,20 @@ mod tests {
         assert_eq!(FanMode::BetterAuto.to_string(), "BETTER_AUTO");
         assert_eq!(FanMode::Manual.to_string(), "MANUAL");
         assert_eq!(FanMode::Max.to_string(), "MAX");
+    }
+
+    #[test]
+    fn test_fan_mode_clone_and_equality() {
+        let mode = FanMode::BetterAuto;
+        let mode_copy = mode;
+        assert_eq!(mode, mode_copy);
+        assert_ne!(FanMode::Auto, FanMode::Max);
+    }
+
+    #[test]
+    fn test_constants() {
+        assert_eq!(DESTINATION, "org.hp.VictusControl");
+        assert_eq!(PATH, "/org/hp/VictusControl");
+        assert_eq!(INTERFACE, "org.hp.VictusControl");
     }
 }

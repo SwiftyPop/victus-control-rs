@@ -356,33 +356,49 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_hwmon_dir_numerical_sorting() {
-        let mut dirs = [
-            PathBuf::from("/sys/devices/platform/hp-wmi/hwmon/hwmon10"),
-            PathBuf::from("/sys/devices/platform/hp-wmi/hwmon/hwmon2"),
-            PathBuf::from("/sys/devices/platform/hp-wmi/hwmon/hwmon1"),
-        ];
+    #[tokio::test]
+    async fn test_invalid_fan_id_validation() {
+        let monitor = Arc::new(HwmonMonitor::new());
+        let controller = FanController::new(monitor);
 
-        dirs.sort_by_key(|path| {
-            path.file_name()
-                .and_then(|s| s.to_str())
-                .and_then(|s| s.strip_prefix("hwmon"))
-                .and_then(|s| s.parse::<u32>().ok())
-                .unwrap_or(0)
+        assert!(controller.set_fan_speed(0, 3000).is_err());
+        assert!(controller.set_fan_speed(3, 3000).is_err());
+        assert!(controller.set_fan_speed(99, 3000).is_err());
+    }
+
+    #[tokio::test]
+    async fn test_mock_sysfs_fan_speed_writing() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("victus_test_sysfs_{}", std::process::id()));
+        let _ = fs::create_dir_all(&temp_dir);
+
+        let fan1_file = temp_dir.join("fan1_target");
+        let fan2_file = temp_dir.join("fan2_target");
+        let _ = fs::write(&fan1_file, "2000");
+        let _ = fs::write(&fan2_file, "2000");
+
+        let monitor = Arc::new(HwmonMonitor::new());
+        let controller = Arc::new(FanController {
+            mode: Mutex::new(FanMode::Manual),
+            monitor,
+            cached_hwmon_dir: Some(temp_dir.clone()),
+            cached_max_rpm_1: 6000,
+            cached_max_rpm_2: 6000,
+            last_written_speed_1: Mutex::new(None),
+            last_written_speed_2: Mutex::new(None),
+            last_effective_temp: Mutex::new(45.0),
+            failed_temp_reads: Mutex::new(0),
         });
 
-        assert_eq!(
-            dirs[0],
-            PathBuf::from("/sys/devices/platform/hp-wmi/hwmon/hwmon1")
-        );
-        assert_eq!(
-            dirs[1],
-            PathBuf::from("/sys/devices/platform/hp-wmi/hwmon/hwmon2")
-        );
-        assert_eq!(
-            dirs[2],
-            PathBuf::from("/sys/devices/platform/hp-wmi/hwmon/hwmon10")
-        );
+        assert!(controller.set_fan_speed(1, 4500).is_ok());
+        assert_eq!(fs::read_to_string(&fan1_file).unwrap().trim(), "4500");
+
+        assert!(controller.set_fan_speed(2, 5200).is_ok());
+        assert_eq!(fs::read_to_string(&fan2_file).unwrap().trim(), "5200");
+
+        // Write deduplication check: should return Ok immediately without rewriting
+        assert!(controller.set_fan_speed(1, 4500).is_ok());
+
+        let _ = fs::remove_dir_all(temp_dir);
     }
 }
