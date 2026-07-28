@@ -97,13 +97,12 @@ if ! lsmod | grep -q '^hp_wmi' || ! hp_wmi_fan_interface_ready; then
     fi
     depmod -a >/dev/null 2>&1 || true
     modprobe led_class_multicolor >/dev/null 2>&1 || true
-    systemctl stop victus-backend.service >/dev/null 2>&1 || true
     if lsmod | grep -q '^hp_wmi'; then
         modprobe -r hp_wmi >/dev/null 2>&1 || true
     fi
     modprobe hp_wmi force_fan_control_support=1 || echo "$log_prefix warning: failed to load hp_wmi module" >&2
-    systemctl start victus-backend.service >/dev/null 2>&1 || true
 fi
+
 
 
 if ! hp_wmi_fan_interface_ready; then
