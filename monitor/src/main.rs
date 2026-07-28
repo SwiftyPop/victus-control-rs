@@ -115,7 +115,7 @@ async fn main() -> Result<()> {
 
     let session_conn = zbus::Connection::session().await.ok();
 
-    let proxy = VictusControlProxy::new(&system_conn).await?;
+    let mut proxy = VictusControlProxy::new(&system_conn).await?;
 
     let start_instant = Instant::now();
     let get_now = move || start_instant.elapsed().as_secs_f64();
@@ -127,6 +127,7 @@ async fn main() -> Result<()> {
     let mut cpu_100 = SustainedAlert::new(100.0, 3.0);
     let mut gpu_80 = SustainedAlert::new(80.0, 12.0);
     let mut gpu_85 = SustainedAlert::new(85.0, 9.0);
+    let mut consecutive_errors = 0;
 
     info!("victus-monitor: watching temperatures via system D-Bus");
 
@@ -138,6 +139,20 @@ async fn main() -> Result<()> {
         let mode = proxy.get_fan_mode().await.ok();
         let fan1 = proxy.get_fan_speed(1).await.ok();
         let fan2 = proxy.get_fan_speed(2).await.ok();
+
+        if cpu.is_none() && gpu.is_none() && mode.is_none() {
+            consecutive_errors += 1;
+            if consecutive_errors >= 3 {
+                warn!("victus-monitor: lost connection to victus-backend D-Bus service; attempting reconnection...");
+                if let Ok(new_proxy) = VictusControlProxy::new(&system_conn).await {
+                    proxy = new_proxy;
+                    consecutive_errors = 0;
+                    info!("victus-monitor: reconnected to victus-backend D-Bus service");
+                }
+            }
+        } else {
+            consecutive_errors = 0;
+        }
 
         if let Some(c) = cpu {
             if cpu_85.update(Some(c), now) {

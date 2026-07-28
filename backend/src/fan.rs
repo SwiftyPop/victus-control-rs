@@ -41,7 +41,7 @@ impl FanController {
             cached_max_rpm_2: max_rpm_2,
             last_written_speed_1: Mutex::new(None),
             last_written_speed_2: Mutex::new(None),
-            last_effective_temp: Mutex::new(0.0),
+            last_effective_temp: Mutex::new(45.0),
             failed_temp_reads: Mutex::new(0),
         });
 
@@ -189,6 +189,10 @@ impl FanController {
     }
 
     pub fn set_fan_speed(&self, fan_id: u32, speed: u32) -> Result<(), String> {
+        if fan_id != 1 && fan_id != 2 {
+            return Err(format!("Invalid fan_id: {}. Must be 1 or 2", fan_id));
+        }
+
         let hwmon_dir = self
             .cached_hwmon_dir
             .as_ref()

@@ -480,15 +480,18 @@ fn install_gnome_extension(workspace_dir: &Path) -> Result<()> {
     if has_gnome {
         let script = workspace_dir.join("gnome-extension/install.sh");
         if script.exists() {
-            println!("--> GNOME Shell detected; installing GNOME extension...");
             let sudo_user = env::var("SUDO_USER").unwrap_or_default();
             if !sudo_user.is_empty() && sudo_user != "root" {
+                println!(
+                    "--> GNOME Shell detected; installing GNOME extension for user '{}'...",
+                    sudo_user
+                );
                 run_cmd_ignore_fail(
                     "sudo",
                     &["-u", &sudo_user, "bash", script.to_str().unwrap()],
                 );
             } else {
-                run_cmd_ignore_fail("bash", &[script.to_str().unwrap()]);
+                println!("--> GNOME Shell detected. To enable the panel extension, run './gnome-extension/install.sh' in your user session.");
             }
         }
     }

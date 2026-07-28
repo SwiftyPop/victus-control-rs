@@ -277,14 +277,14 @@ pub fn build_ui(app: &Application) {
                     }
                 }
                 if let Ok(rpm1) = p_f1.get_fan_speed(1).await {
-                    if rpm1 > 0 {
+                    if rpm1 >= 0 {
                         f1_lbl.set_text(&format!("Fan 1: {} RPM", rpm1));
                     } else {
                         f1_lbl.set_text("Fan 1: -- RPM");
                     }
                 }
                 if let Ok(rpm2) = p_f2.get_fan_speed(2).await {
-                    if rpm2 > 0 {
+                    if rpm2 >= 0 {
                         f2_lbl.set_text(&format!("Fan 2: {} RPM", rpm2));
                     } else {
                         f2_lbl.set_text("Fan 2: -- RPM");
@@ -359,11 +359,17 @@ pub fn build_ui(app: &Application) {
         }
     });
 
-    // Fan 1 slider callback
+    // Fan 1 slider callback with step quantization to prevent D-Bus message flood
     let proxy_f1 = proxy_cell.clone();
     let err_lbl_f1 = error_label.clone();
+    let last_sent_f1 = Rc::new(Cell::new(0u32));
     fan1_scale.connect_value_changed(move |scale| {
-        let val = scale.value() as u32;
+        let raw_val = scale.value() as u32;
+        let val = ((raw_val + 25) / 50) * 50;
+        if val == last_sent_f1.get() {
+            return;
+        }
+        last_sent_f1.set(val);
         if let Some(ref proxy) = *proxy_f1.borrow() {
             let p = proxy.clone();
             let err_lbl = err_lbl_f1.clone();
@@ -383,11 +389,17 @@ pub fn build_ui(app: &Application) {
         }
     });
 
-    // Fan 2 slider callback
+    // Fan 2 slider callback with step quantization to prevent D-Bus message flood
     let proxy_f2 = proxy_cell.clone();
     let err_lbl_f2 = error_label;
+    let last_sent_f2 = Rc::new(Cell::new(0u32));
     fan2_scale.connect_value_changed(move |scale| {
-        let val = scale.value() as u32;
+        let raw_val = scale.value() as u32;
+        let val = ((raw_val + 25) / 50) * 50;
+        if val == last_sent_f2.get() {
+            return;
+        }
+        last_sent_f2.set(val);
         if let Some(ref proxy) = *proxy_f2.borrow() {
             let p = proxy.clone();
             let err_lbl = err_lbl_f2.clone();
