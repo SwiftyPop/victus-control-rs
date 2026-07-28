@@ -271,14 +271,14 @@ pub fn build_ui(app: &Application) {
                     }
                 }
                 if let Ok(rpm1) = p_f1.get_fan_speed(1).await {
-                    if rpm1 >= 0 {
+                    if rpm1 != u32::MAX {
                         f1_lbl.set_text(&format!("Fan 1: {} RPM", rpm1));
                     } else {
                         f1_lbl.set_text("Fan 1: -- RPM");
                     }
                 }
                 if let Ok(rpm2) = p_f2.get_fan_speed(2).await {
-                    if rpm2 >= 0 {
+                    if rpm2 != u32::MAX {
                         f2_lbl.set_text(&format!("Fan 2: {} RPM", rpm2));
                     } else {
                         f2_lbl.set_text("Fan 2: -- RPM");

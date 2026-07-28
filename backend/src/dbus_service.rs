@@ -26,11 +26,8 @@ impl VictusControlService {
         self.hwmon.get_gpu_temp().unwrap_or(0.0)
     }
 
-    async fn get_fan_speed(&self, fan_id: u32) -> i32 {
-        self.fan
-            .get_fan_speed(fan_id)
-            .map(|rpm| rpm as i32)
-            .unwrap_or(-1)
+    async fn get_fan_speed(&self, fan_id: u32) -> u32 {
+        self.fan.get_fan_speed(fan_id).unwrap_or(u32::MAX)
     }
 
     async fn get_fan_max_speed(&self, fan_id: u32) -> u32 {
